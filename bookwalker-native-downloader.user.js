@@ -2,7 +2,7 @@
 // @name         BookWalker Native Downloader
 // @namespace    http://tampermonkey.net/
 // @version      1.5.0
-// @description  BookWalker downloader — save a manga or light novel as a ZIP/CBZ of full-resolution pages, fetched straight from the CDN with no page-flipping or screenshots. Optional Japanese OCR via mokuro-bridge, plus upload to MEGA, Google Drive or OneDrive.
+// @description  Saves a book from the BookWalker viewer as a ZIP or CBZ of full-resolution page images, fetched from the CDN and unscrambled offline. Optional Japanese OCR through mokuro-bridge, with upload to MEGA, Google Drive or OneDrive.
 // @author       GolyBidoof
 // @homepageURL  https://github.com/GolyBidoof/bookwalker-native-downloader
 // @supportURL   https://github.com/GolyBidoof/bookwalker-native-downloader/issues
@@ -36,7 +36,7 @@
 //   On first install Tampermonkey asks for cross-origin access to
 //   learnnatively.com (and manga-kotoba.com). That permission powers the
 //   reading-stat cards. If you decline it, the script still works fully for
-//   downloading/Mokuro — the LearnNatively card is then fetched through a public
+//   downloading/Mokuro, the LearnNatively card is then fetched through a public
 //   CORS proxy instead, or hidden if the proxy is unreachable.
 // ==/UserScript==
 (function () {
@@ -71,7 +71,7 @@
         configFromUrl: null
     };
 
-    // Shared protocol/presentation constants — single source of truth for
+    // Shared protocol/presentation constants, single source of truth for
     // values that used to be inlined at every call site.
     const AUTH_PARAM_KEYS = ['hti', 'cfg', 'bid', 'uuid', 'pfCd', 'Policy', 'Signature', 'Key-Pair-Id'];
     const JPEG_QUALITY = 0.92;                // default re-encode quality for output pages
@@ -97,7 +97,7 @@
                 ? window.__bwddImageQuality : localStorage.getItem('bwddImageQuality');
             const qv = parseFloat(raw);
             if (isFinite(qv) && qv > 0 && qv <= 1) quality = qv;
-        } catch (e) { /* opaque origin, or storage disabled — keep the defaults */ }
+        } catch (e) { /* opaque origin, or storage disabled, keep the defaults */ }
         // 'lossless' is WebP at quality 1, which is bit-exact; browsers without a
         // WebP encoder fall back to PNG, which is lossless too. Either way the
         // lossless setting really is lossless.
@@ -200,7 +200,7 @@
         });
     }
     // Cache entries are {blob, ts} so we can enforce a TTL (entries older than
-    // PAGE_CACHE_TTL_MS are purged) and a size cap — the IndexedDB cache must
+    // PAGE_CACHE_TTL_MS are purged) and a size cap, the IndexedDB cache must
     // never grow unboundedly and eat the browser's memory/disk.
     const PAGE_CACHE_TTL_MS = 20 * 60 * 1000;   // 20 minutes
     const PAGE_CACHE_MAX_ENTRIES = 4000;        // safety cap (~3 GB at 700 KB/page)
@@ -308,7 +308,7 @@
         try { return window.location.origin; } catch (e) { return ''; }
     }
 
-    // Single reader for captured API/config responses — used by both the
+    // Single reader for captured API/config responses, used by both the
     // fetch and XHR hooks below so the two capture paths can never classify an
     // endpoint differently (they once duplicated this and drifted). Handles:
     //   /browserWebApi/c | /trial-page/c  → full auth reply (auth_info + url)
@@ -325,7 +325,7 @@
                 recordApiBase(url);
                 const d = JSON.parse(text);
                 if (d.auth_info) {
-                    // pb rotates the CloudFront policy — a changed signature
+                    // pb rotates the CloudFront policy, a changed signature
                     // resets the request-count budget (fetch and XHR capture
                     // paths now behave identically here).
                     const before = authPolicySig();
@@ -1007,7 +1007,7 @@
                     // Blit each tile straight from the decoded bitmap into its
                     // destination rect. The previous version pulled the whole
                     // frame back with getImageData, copied the tiles in JS and
-                    // pushed it back with putImageData — about 46MB of avoidable
+                    // pushed it back with putImageData, about 46MB of avoidable
                     // memory traffic per page, which is what stopped the decoder
                     // keeping up with the fetcher. Measured 2.08x on 14 cores.
                     for (const t of A9p(seeds, W, H)) {
@@ -1133,7 +1133,7 @@
     // Chrome allows 6 concurrent HTTP/1.1 connections per origin (scheme + host
     // + PORT), and the CDN is a single HTTP/1.1 host, so the page alone is pinned
     // at 6. Extra lanes: `gm` (Tampermonkey's own pool) and `px:N` (a local helper
-    // port — a port is part of the origin, so that one scales without limit).
+    // port, a port is part of the origin, so that one scales without limit).
     const PROXY_HOST = 'http://127.0.0.1:';
     const PROXY_BASE_PORT = 7010;
     // Chrome runs out of sockets around 300 per profile, so past ~50 ports the
@@ -1164,7 +1164,7 @@
     // Chrome keys its socket pool by *site*, so a subdomain of a host we can
     // already reach buys nothing; "host." (trailing dot) is a distinct host and
     // gets its own pool. The signed policy covers a path wildcard, so the dot
-    // cannot break the signature — but whether CloudFront serves it is not
+    // cannot break the signature, but whether CloudFront serves it is not
     // knowable in advance, so the lane self-verifies on a real page and a
     // rejection costs one request.
     let dotLaneEnabled = false;
@@ -1185,7 +1185,7 @@
             if (res && res.ok) {
                 dotLaneEnabled = true;
                 addLane('dot');
-                console.info('[bwdd] trailing-dot lane ENABLED — the CDN serves ' +
+                console.info('[bwdd] trailing-dot lane ENABLED: the CDN serves ' +
                     'bw-bv-epubs.bookwalker.jp. as its own site (+6 sockets)');
                 return true;
             }
@@ -1237,13 +1237,13 @@
                 return false;
             }
             if (j.tokenRequired && !edgeToken) {
-                console.warn('[bwdd] edge mirror needs a token — set localStorage.bwddEdgeToken');
+                console.warn('[bwdd] edge mirror needs a token; set localStorage.bwddEdgeToken');
                 return false;
             }
             edgeLaneEnabled = true;
             addLane('edge');
             console.info('[bwdd] HTTP/2 edge mirror ENABLED at ' + edgeUrl +
-                ' — multiplexed streams instead of 6 sockets');
+                ': multiplexed streams instead of 6 sockets');
             return true;
         } catch (e) {
             console.info('[bwdd] edge mirror off (' + ((e && e.message) || e) + ')');
@@ -1270,7 +1270,7 @@
         return out;
     }
     // How much real parallelism a lane can carry. Six everywhere except the
-    // edge mirror, which multiplexes many streams over one HTTP/2 connection —
+    // edge mirror, which multiplexes many streams over one HTTP/2 connection ,
     // so it should absorb proportionally more traffic instead of splitting
     // evenly with a lane that can only ever run 6 at a time.
     function laneCapacity(L) {
@@ -1284,7 +1284,7 @@
         return n;
     }
 
-    // NOTE: named gmBlobFetch, not gmFetch — the stats section further down
+    // NOTE: named gmBlobFetch, not gmFetch, the stats section further down
     // already declares a `gmFetch` in this same scope, and a duplicate function
     // declaration hoists with the *last* one winning for the whole scope.
     function gmBlobFetch(url, timeoutMs) {
@@ -1333,7 +1333,7 @@
     // CDN on a band of extra localhost ports, each a separate browser origin
     // worth 6 more sockets, and advertises them in /health. So a user who
     // already runs the bridge for OCR gets the extra lanes with no setup at all.
-    // Downloading never *depends* on it — no bridge simply means no lanes.
+    // Downloading never *depends* on it, no bridge simply means no lanes.
     async function probeBridgeFetchProxy() {
         try {
             const r = await fetchWithTimeout(MOKURO_BRIDGE_URL + '/health',
@@ -1387,7 +1387,7 @@
 
     // Last known bridge reachability, mirrored out of buildUI's poll. Discovered
     // proxy ports outlive the bridge (they are only ever added, never dropped
-    // mid-run), so this — not the port count — decides what can be promised now.
+    // mid-run), so this, not the port count, decides what can be promised now.
     let laneBridgeOnline = false;
 
     // Total socket budget the browser will be able to use, given every lane this
@@ -1486,7 +1486,7 @@
         }
         if (lane.kind === 'proxy') {
             const res = await fetchWithTimeout(proxyUrlFor(lane.port, url), { credentials: 'omit' }, to);
-            // 502 is the helper failing to reach the CDN — a transport problem,
+            // 502 is the helper failing to reach the CDN, a transport problem,
             // not the CDN's verdict. Real statuses pass through untouched so
             // cdnFetch's retry logic still sees them.
             if (res.status === 502) throw new Error('fetch proxy upstream error');
@@ -1510,7 +1510,7 @@
         const isPage = lane.kind === 'page';
         // A lane can legitimately answer with a CDN status (403/404) that
         // cdnFetch must act on, so a non-ok response is returned rather than
-        // thrown — it only counts towards retiring a consistently useless lane.
+        // thrown, it only counts towards retiring a consistently useless lane.
         const countsNonOk = lane.kind === 'edge' || lane.kind === 'dot';
         st.inflight++;
         try {
@@ -1657,7 +1657,7 @@
             if (m) {
                 // Pick the variant this rel actually lives in FIRST. Captures:
                 // cover/front-matter/shared pages sit under SVGA/shared while
-                // the body pages sit under SVGA/normal_default — a mismatched
+                // the body pages sit under SVGA/normal_default, a mismatched
                 // first guess 403s and (in the old code) stalled the whole run
                 // on breaker cooldowns. Guessing right means the first probe
                 // usually 200s.
@@ -1745,7 +1745,7 @@
                     if (authPolicySig() !== before) { reqsSinceAuth = 0; continue; }
                 }
                 // A fresh policy that still 403s is usually BookWalker's cached S3
-                // error page for one object — per-URL and transient (in a
+                // error page for one object, per-URL and transient (in a
                 // 308-request capture every 403 cleared on a plain retry), not a
                 // path denial. One jittered retry before concluding the path
                 // is wrong, so one bad edge entry cannot cost a whole page. The
@@ -1898,7 +1898,7 @@
             const target = norm(usedTitle);
             // manga-kotoba's /series/ results wrap an entire card in the anchor
             // (Japanese title, English title, author, label, genres…), so
-            // anchor.textContent is far broader than the series name — the old
+            // anchor.textContent is far broader than the series name, the old
             // "whole-anchor substring" scoring made any spin-off listed before
             // the base series win, because its card merely *contains* the name
             // (e.g. 幸色のワンルーム　外伝　正壊の名探偵 beat 幸色のワンルーム).
@@ -2047,7 +2047,7 @@
             // the series page), not the raw first search hit: the search API
             // ranks by popularity, so for 幸色のワンルーム it returns
             // "幸色のワンルーム 1" (series_order 1) even when the resolved
-            // book is volume 3 — which made the card read "… 1" while the
+            // book is volume 3, which made the card read "… 1" while the
             // Book link correctly pointed at 幸色のワンルーム 3.
             return Object.assign({
                 seriesUrl: 'https://learnnatively.com/series/' + sid + '/',
@@ -2097,7 +2097,7 @@
     // Fire both catalog lookups at once and render each card the moment its
     // own lookup resolves. The old fetchMangaStats awaited Manga-Kotoba first
     // and only then started LearnNatively (search API → series page → book
-    // page), so nothing appeared until both chains finished — and the MK card
+    // page), so nothing appeared until both chains finished, and the MK card
     // waited on LN's extra requests. Here each card shows as soon as it is
     // found; a slow or missing site only delays (or skips) its own card.
     // Both lookups swallow their failures and resolve to null, so a null
@@ -2225,7 +2225,7 @@
         const bits = [];
         if (ln.avgRating != null) {
             // "★ 4.3 · 1,204 ratings" (the second number is ratings when present,
-            // otherwise the review count — never leave it unlabeled).
+            // otherwise the review count, never leave it unlabeled).
             if (ln.ratings != null) {
                 bits.push(`★ ${Number(ln.avgRating).toFixed(1)} · ${Number(ln.ratings).toLocaleString()} ratings`);
             } else if (ln.reviews != null) {
@@ -2382,7 +2382,7 @@
     // per-method "default" flag) must be reported only when it is actually
     // usable: "local" is always configured, so picking the first *configured*
     // method would always say "saving locally". But an unconfigured default
-    // (e.g. drive not set up yet) must not be advertised as the destination —
+    // (e.g. drive not set up yet) must not be advertised as the destination ,
     // fall back to the first configured method (normally local).
     async function mokuroUploadPlan() {
         const methods = uploadMethods || await fetchUploadMethods();
@@ -2450,7 +2450,7 @@
             } catch (e) {}
             await new Promise(res => setTimeout(res, 1000));
         }
-        return false;   // still busy after the timeout — caller decides
+        return false;   // still busy after the timeout, caller decides
     }
 
     async function mokuroStartSession(title) {
@@ -2493,12 +2493,12 @@
         } catch (e) { return null; }
     }
     // Reads the bridge's finalize NDJSON stream.
-    //   onStage(stage, msg)      — every frame
-    //   onUpload(ev) — live upload progress; ev carries the per-file payload
+    //   onStage(stage, msg)     , every frame
+    //   onUpload(ev), live upload progress; ev carries the per-file payload
     //     {file, percent, speed, currentBytes, totalBytes, method, remotePath}.
     //     The bridge streams per-file upload_progress frames (one file at a
     //     time, each with that file's own percent/bytes), so the caller must
-    //     accumulate across files — use makeUploadBarUpdater() below.
+    //     accumulate across files, use makeUploadBarUpdater() below.
     async function readNdjsonStream(res, onStage, onUpload) {
         if (!res.body) throw new Error('No streaming response body from bridge');
         const reader = res.body.getReader();
@@ -2602,10 +2602,10 @@
     // files in upload order (seeded up front from the bridge's "upload" frame
     // `files:` list, then fed live per-file progress). The label reads
     //   "1/3 · 62% · 65.0 MB / 104.8 MB · 5.1 MiB/s"
-    // i.e. file k of N · overall % · bytes · speed — no file name clutter.
+    // i.e. file k of N · overall % · bytes · speed, no file name clutter.
     // The fill is the byte-weighted overall % (sum done / sum total), which
     // is monotonic because every file's total is known before it uploads.
-    // The k/N and size totals are *kept after completion* — finishing never
+    // The k/N and size totals are *kept after completion*, finishing never
     // blanks the bar; the stage handler may append "done" separately.
     function makeUploadBarUpdater(bar) {
         const order = [];              // file names in first-seen (upload) order
@@ -2681,10 +2681,10 @@
         return feed;
     }
     // Ask the bridge to finalize + store a volume.
-    //   opts.method   — upload_method id ('local' | 'mega' | 'drive' | 'onedrive' | 'webdav').
+    //   opts.method  , upload_method id ('local' | 'mega' | 'drive' | 'onedrive' | 'webdav').
     //                   null/omitted → let the bridge decide (env default).
-    //   opts.localDir — when method is 'local', write output to this folder.
-    //   opts.forceMega— legacy fallback: when the bridge rejects upload_method,
+    //   opts.localDir, when method is 'local', write output to this folder.
+    //   opts.forceMega, legacy fallback: when the bridge rejects upload_method,
     //                   retry once with upload_to_mega=true (old bridges).
     // delete_after_upload=true cleans the bridge's working files on success.
     // Protocol: github.com/GolyBidoof/mokuro-bridge.
@@ -2751,15 +2751,15 @@
     // ── Cross-platform (Windows / Linux / macOS) output naming ────────────
     // Everything the user ultimately saves to disk (ZIP inner folders, the
     // downloaded .zip name) must be legal on the *worst-case* target
-    // filesystem — Windows. cleanTitle() above already drops the characters
+    // filesystem, Windows. cleanTitle() above already drops the characters
     // Windows forbids in file names (\/:*?"<>| plus C0 controls); fsSafePath()
     // additionally covers the rules that only bite on Windows:
-    //   • trailing dots/spaces — NTFS strips them silently, so what gets
+    //   • trailing dots/spaces, NTFS strips them silently, so what gets
     //     created is not what the user named (and a name that is only dots
     //     becomes '' or '.' and fails),
     //   • reserved device names (CON, PRN, AUX, NUL, COM1–9, LPT1–9, CONIN$,
-    //     CONOUT$) — creating the file/folder fails or it gets auto-renamed,
-    //   • component length — NTFS caps a path component at 255 UTF-16 units;
+    //     CONOUT$), creating the file/folder fails or it gets auto-renamed,
+    //   • component length, NTFS caps a path component at 255 UTF-16 units;
     //     we cap at 190 code points so the whole extraction path stays well
     //     inside the legacy 260-char Windows limit too.
     // Linux/macOS tolerate all of this output unchanged.
@@ -2777,13 +2777,13 @@
         return s;
     }
     // Default archive/output name for the current book: the volume's own
-    // displayed title (series + volume number kept in the store's own format —
+    // displayed title (series + volume number kept in the store's own format ,
     // e.g. "…1巻", "（１）", "… 1") with BookWalker's reader/edition labels in
     // 【…】 removed wherever they sit. cleanTitle() only strips a *leading*
     // 【…】 group, so mid/suffix labels like "…1巻【無料お試し版】" or
     // "…【期間限定無料】 1" would otherwise leak into the generated name, and
     // splitSeriesVolume() would rewrite "1巻"→"1" / "（１）"→"1" (it
-    // deliberately normalizes digits for the stat lookups) — losing the volume
+    // deliberately normalizes digits for the stat lookups), losing the volume
     // format the store itself uses. Like splitSeriesVolume/searchTitleCandidates
     // above, any 【…】 group is treated as a store label, not series text.
     function archiveDefaultName(rawTitle) {
@@ -2793,7 +2793,7 @@
         return fsSafePath(s);
     }
     // ZIPs are flat: every page sits at the archive root as page-NNNN.jpg (no
-    // nested Series/Volume/ folder inside the zip — comic/manga readers expect
+    // nested Series/Volume/ folder inside the zip, comic/manga readers expect
     // pages flat in the archive). The series→volume nesting the bridge builds
     // for OCR/upload runs is done on the bridge side from the session title
     // (output/<series>/<volume>.cbz), so it is unaffected by flat ZIPs here.
@@ -2835,7 +2835,7 @@
         return (t && t[method]) || method || '';
     }
     // The WebDAV base URL as reported by the bridge (/upload-methods extras or
-    // /health upload_methods) — used to rebuild direct file URLs, since WebDAV
+    // /health upload_methods), used to rebuild direct file URLs, since WebDAV
     // has no share-link concept to attach to upload frames.
     function webdavBaseUrl() {
         const lists = [];
@@ -2989,9 +2989,9 @@
     // 10a. Light/dark scheme detection (environment / browser / OS)
     // =====================================================================
     // Real detection of the current color scheme, not a styling guess: we
-    // ask the platform through prefers-color-scheme — which reflects the OS
+    // ask the platform through prefers-color-scheme, which reflects the OS
     // "dark mode" toggle, the browser's own theme, and any browser-level
-    // per-site override — and make that decision the single authority:
+    // per-site override, and make that decision the single authority:
     //   • <html data-bwdd-theme="dark|light"> mirrors the detected scheme
     //     (available to CSS rules or to any other code);
     //   • bwddTheme.isDark() / .current / .onChange() give the script a live
@@ -3001,7 +3001,7 @@
     //     the theme follows the OS/browser in every environment instead of
     //     depending on the page honouring a media query.
     // A 'change' listener keeps everything in sync when the user flips the
-    // OS/browser theme while the viewer is already open — no reload needed.
+    // OS/browser theme while the viewer is already open, no reload needed.
     const bwddTheme = (() => {
         let scheme = 'light';          // resolved value: 'dark' | 'light'
         let started = false;
@@ -3086,7 +3086,7 @@
     })();
     try { bwddTheme.start(); } catch (e) {}
     try {
-        console.info('[bwdd] BookWalker Native Downloader v' + BWDD_VERSION + ' loaded — image codec: ' +
+        console.info('[bwdd] BookWalker Native Downloader v' + BWDD_VERSION + ' loaded, image codec: ' +
             IMAGE_CODEC.fmt + (IMAGE_CODEC.lossless ? ' (lossless)' : ' q' + IMAGE_CODEC.quality) +
             ', extension .' + IMAGE_CODEC.ext);
     } catch (e) {}
@@ -3147,7 +3147,7 @@
   --bwdd-caps-on-strong: #064e3b;
   --bwdd-caps-off-bg: #f8fafc;
   --bwdd-caps-off-border: #e2e8f0;
-  --bwdd-busy: #d97706;   /* amber — bridge busy (OCR/upload) */
+  --bwdd-busy: #d97706;   /* amber, bridge busy (OCR/upload) */
   --bwdd-glow-busy: 0 0 6px rgba(217, 119, 6, 0.45);
   --bwdd-white: #ffffff;
 
@@ -3220,7 +3220,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 0 1 auto;   /* natural width — the GitHub link sits right after the text */
+  flex: 0 1 auto;   /* natural width, the GitHub link sits right after the text */
   min-width: 0;
 }
 .bwdd-gh {
@@ -3469,7 +3469,7 @@
 .bwdd-bar-fill { z-index: 2; }
 .bwdd-bar-fill-bg {
   z-index: 1;
-  background: var(--bwdd-amber-fill);   /* faint amber — pages received, not yet OCR'd */
+  background: var(--bwdd-amber-fill);   /* faint amber, pages received, not yet OCR'd */
 }
 .bwdd-bar-legend {
   font-size: 10px;
@@ -3478,7 +3478,7 @@
   margin-top: 1px;
 }
 
-/* Cards & Badges — compact, LearnNatively / Manga-Kotoba inspired */
+/* Cards & Badges, compact, LearnNatively / Manga-Kotoba inspired */
 .bwdd-cards { display: flex; flex-direction: column; gap: 8px; }
 .bwdd-cards:empty { display: none; }
 .bwdd-card {
@@ -3825,7 +3825,7 @@
 /* Destination section dimmed while a run holds the lock */
 .bwdd-dest-locked { opacity: 0.7; }
 
-/* "Open Reader Mokuro" + open-file/copy — one quiet row, only after a
+/* "Open Reader Mokuro" + open-file/copy, one quiet row, only after a
    successful OCR run. Both are secondary actions, so they share a calm
    outline-button look instead of loud filled gradients. */
 .bwdd-reader-row {
@@ -3900,7 +3900,7 @@
   max-height: 140px;
   overflow: auto;
 }
-/* Panel flapped away to the right — an edge tab stays to bring it back */
+/* Panel flapped away to the right, an edge tab stays to bring it back */
 #bwdd-root.bwdd-flapped { pointer-events: none; }
 .bwdd-edge-tab {
   position: fixed;
@@ -3974,7 +3974,7 @@
 `;
         (document.head || document.documentElement).appendChild(css);
 
-        // Dark palette (only active while bwddTheme detects dark — section
+        // Dark palette (only active while bwddTheme detects dark, section
         // 10a). This is a deliberate per-rule remap, not a blanket inversion:
         // the script's own chrome and surfaces are re-themed with the dark
         // palette chosen for contrast (slate-900 surfaces, slate-200/300/400
@@ -4044,7 +4044,7 @@
 
 /* LearnNatively card, dark variant: warm espresso surfaces with cream text.
    The difficulty level rectangles (.bwdd-nlvl-pill) are deliberately NOT
-   restyled here — their semantic colors are set inline by JS and already
+   restyled here, their semantic colors are set inline by JS and already
    read correctly on the dark card. */
 .bwdd-card[data-card="natively"] {
   background: #201a12;
@@ -4097,7 +4097,7 @@
 .bwdd-edge-tab { background: #3b82f6; color: #ffffff; box-shadow: -3px 0 10px rgba(0, 0, 0, 0.4); }
 .bwdd-edge-tab:hover { background: #60a5fa; }
 .bwdd-edge-tab:focus-visible { outline-color: #60a5fa; }
-/* Quiet reader/stored row (dark) — colors come from --bwdd-* tokens */
+/* Quiet reader/stored row (dark), colors come from --bwdd-* tokens */
 .bwdd-reader-row > .bwdd-ghost-btn { background: var(--bwdd-bg); color: var(--bwdd-text-muted); border-color: var(--bwdd-border-strong); }
 .bwdd-reader-row > .bwdd-ghost-btn:hover { background: var(--bwdd-bg-sunken); color: var(--bwdd-link); border-color: var(--bwdd-link); }
 
@@ -4209,7 +4209,7 @@
         ctrlGroup.append(flapBtn, minBtn, closeBtn);
 
         // Visible drag grip at the left of the header (the whole header also
-        // drags — this just makes the affordance obvious).
+        // drags, this just makes the affordance obvious).
         const dragGrip = document.createElement('span');
         dragGrip.className = 'bwdd-drag-grip';
         dragGrip.setAttribute('aria-hidden', 'true');
@@ -4234,7 +4234,7 @@
         bridgeRow.append(dot, bridgeText);
 
         // Red alert shown below the bridge row when the bridge runs but mokuro
-        // itself is not installed — the OCR button is unusable in that state.
+        // itself is not installed, the OCR button is unusable in that state.
         const mokuroAlert = document.createElement('div');
         mokuroAlert.className = 'bwdd-mokuro-alert';
         mokuroAlert.style.display = 'none';
@@ -4273,7 +4273,7 @@
         infoTitle.className = 'bwdd-bridge-info-title';
         infoTitle.textContent = 'What is the Mokuro Bridge?';
 
-        // Section 1 — the mokuro OCR engine installed on this machine
+        // Section 1, the mokuro OCR engine installed on this machine
         // (version + custom-fork marker), or a red note when it's missing.
         // Updated from /health on each status tick.
         const mokuroSection = document.createElement('div');
@@ -4289,7 +4289,7 @@
         const divider1 = document.createElement('hr');
         divider1.className = 'bwdd-bridge-info-divider';
 
-        // Section 2 — what the bridge does
+        // Section 2, what the bridge does
         const aboutSection = document.createElement('div');
         aboutSection.className = 'bwdd-bridge-info-section';
         const aboutSectionHeading = document.createElement('span');
@@ -4312,7 +4312,7 @@
         const divider3 = document.createElement('hr');
         divider3.className = 'bwdd-bridge-info-divider';
 
-        // Section 3 — how many connections this run will actually get. Filled by
+        // Section 3, how many connections this run will actually get. Filled by
         // renderCapabilities() on every bridge poll, so it is accurate whether or
         // not the bridge is running.
         const connSection = document.createElement('div');
@@ -4361,7 +4361,7 @@
             return '';
         }
         async function updateBridgeDot() {
-            if (!root.isConnected) return;   // panel closed — skip the tick entirely
+            if (!root.isConnected) return;   // panel closed, skip the tick entirely
             const ok = await bridgeHealth();
             let mokuroMissing = false;
             let mokuroDetailText = '';
@@ -4369,7 +4369,7 @@
             let bridgeBusyStage = '';
             let bridgeBusyDetail = '';
             // The bridge answers /health even when mokuro isn't installed
-            // (mokuro_installed:false) — that still means the bridge process is
+            // (mokuro_installed:false), that still means the bridge process is
             // up, so it's an "online but unusable for OCR" state, not offline.
             if (ok && bridgeReachableNow) {
                 const info = await refreshBridgeInfo().catch(() => null);
@@ -4409,7 +4409,7 @@
                     'OCR cannot run until you install it — e.g. run “pip install mokuro” (or point ' +
                     'the bridge at your mokuro checkout) in the mokuro-bridge folder, then restart the bridge.';
             } else if (ok && bridgeBusy) {
-                // Bridge is working (OCR/upload) — amber dot + reason.
+                // Bridge is working (OCR/upload), amber dot + reason.
                 dot.className = 'bwdd-indicator-dot busy';
                 mokuroAlert.style.display = 'none';
             } else {
@@ -4428,7 +4428,7 @@
                     bridgeText.textContent = 'Mokuro Bridge busy — ' + (busyReason({ busy: true, busy_stage: bridgeBusyStage, busy_detail: bridgeBusyDetail }) || 'working');
                     bridgeRow.title = 'mokuro-bridge: ' + (bridgeBusyDetail ? bridgeBusyDetail + ' · ' : '') + 'github.com/GolyBidoof/mokuro-bridge';
                 } else {
-                    // Idle — describe the destination from the panel's own pick
+                    // Idle, describe the destination from the panel's own pick
                     // (the same dropdown the user sees), so the status line can
                     // never contradict what is about to be used at finalize.
                     try {
@@ -4461,8 +4461,8 @@
             // OCR button + destination pickers derive from the run lock, so
             // this periodic tick can never re-enable them mid-run.
             setRunLock(runBusy);
-            // Poll fast (1 s) while the bridge is busy — whether from our own
-            // run or background work it reports via /health — so the UI
+            // Poll fast (1 s) while the bridge is busy, whether from our own
+            // run or background work it reports via /health, so the UI
             // notices the moment it goes idle; otherwise settle to 10 s.
             bridgePollFast = !!(bridgeBusy || runBusy);
             laneBridgeOnline = bridgeReachableNow;
@@ -4596,7 +4596,7 @@
         namePop.id = 'bwdd-archive-name-pop';
         namePop.hidden = true;
         namePop.setAttribute('role', 'note');
-        // Explanatory copy — kept short; the label + placeholder already say
+        // Explanatory copy, kept short; the label + placeholder already say
         // what the field is, this answers "what happens with the value".
         const namePopP1 = document.createElement('div');
         namePopP1.textContent = 'Name of the generated archive: the .zip \u201cSave as ZIP\u201d downloads, or the volume the Mokuro bridge stores/uploads when OCR runs.';
@@ -4706,19 +4706,19 @@
         // populate from the bridge's /upload-methods list
         // Which method the user actually picked. This is kept separate from
         // destSelect.value because populateDestMethods() rebuilds the dropdown
-        // on every 10s bridge-health tick — a refresh that cannot represent
+        // on every 10s bridge-health tick, a refresh that cannot represent
         // the current pick right now must not forget it and silently fall back
         // to the default ('local') forever.
         let userMethod = null;
         // A value is "usable" only when it maps to a configured, enabled option
-        // — an unconfigured provider is selectable (to read its setup hint) but
+        //, an unconfigured provider is selectable (to read its setup hint) but
         // must never be restored/seeded as the effective destination.
         const hasUsableOption = (v) => v != null && [...destSelect.options]
             .some(o => o.value === v && !o.disabled && !(o.dataset && o.dataset.unconfigured));
 
         async function populateDestMethods() {
             const methods = await fetchUploadMethods().catch(() => null);
-            // A run may have started while this fetch was in flight — never
+            // A run may have started while this fetch was in flight, never
             // repopulate (and thereby change) the pick a running OCR session is
             // going to finalize with.
             if (runBusy) return;
@@ -4736,7 +4736,7 @@
                         opt.textContent = m.name + (m.current_folder ? ' — ' + m.current_folder : '');
                     } else {
                         // Unconfigured: still selectable so the user can ask
-                        // about it — choosing it shows the setup hint below and
+                        // about it, choosing it shows the setup hint below and
                         // disables the OCR button until the provider is set up.
                         opt.textContent = m.name + ' — needs setup';
                         opt.dataset.unconfigured = '1';
@@ -4763,11 +4763,11 @@
             }
             // Pick the value to show after the rebuild:
             //   1. whatever the user currently has selected, if it still exists
-            //      (configured or not — a "needs setup" pick must survive a
+            //      (configured or not, a "needs setup" pick must survive a
             //      tick so its hint keeps showing and OCR stays blocked),
             //   2. else the remembered usable method (seeded from localStorage
             //      on first open, retained so it comes back once the bridge
-            //      lists it again — a stale default never overrides it),
+            //      lists it again, a stale default never overrides it),
             //   3. else the bridge's usable default, else 'local'.
             let picked = null;
             if (prevValue) {
@@ -4818,8 +4818,8 @@
         }
         // The setup hint is tied to the selection: it appears only when the
         // destination actually chosen isn't configured yet (and the OCR button
-        // is disabled until it is). A configured pick — or a fully configured
-        // bridge — shows no hint at all. Once the provider is set up, the next
+        // is disabled until it is). A configured pick, or a fully configured
+        // bridge, shows no hint at all. Once the provider is set up, the next
         // health tick lists it as configured and the hint disappears.
         function updateDestHint() {
             const selOpt = destSelect.selectedOptions && destSelect.selectedOptions[0];
@@ -4851,7 +4851,7 @@
             runBusy = busy;
             btnZip.disabled = busy;
             btnZip.setAttribute('aria-disabled', String(busy));
-            // OCR availability folds in the destination-setup state too — see
+            // OCR availability folds in the destination-setup state too, see
             // refreshOcrButton (kept in sync on every selection change).
             refreshOcrButton();
             const destLocked = busy || !bridgeOnline;
@@ -4869,7 +4869,7 @@
             }
             // Closing or flapping the panel mid-run would orphan the pipeline
             // (auth timers, OCR polls, the finalize stream) that keeps posting
-            // into a detached DOM — hold both header buttons until it finishes.
+            // into a detached DOM, hold both header buttons until it finishes.
             closeBtn.disabled = busy;
             flapBtn.disabled = busy;
             if (busy) {
@@ -4881,8 +4881,8 @@
             }
         }
 
-        // Post-run actions — "Open Reader Mokuro" + "Open stored file / Copy
-        // path" — one quiet row of secondary (ghost) buttons that appears only
+        // Post-run actions, "Open Reader Mokuro" + "Open stored file / Copy
+        // path", one quiet row of secondary (ghost) buttons that appears only
         // after a successful OCR run, side by side on a single line. Each
         // button spans the whole row on its own when the other has nothing to
         // offer (the row is grid auto-fit).
@@ -4978,7 +4978,7 @@
         // Two-column layout: download & bridge controls on the left (always
         // present), reading stats on the right. The stats column is mounted
         // only once the first card (book details / LearnNatively /
-        // Manga-Kotoba) lands in statsEl — until then the panel is a single
+        // Manga-Kotoba) lands in statsEl, until then the panel is a single
         // controls column, never an empty second one.
         // ---- pre-flight readout ------------------------------------------
         // These numbers live in the bridge row's "?" popover, not the panel
@@ -5049,10 +5049,10 @@
             jpeg: 'JPEG', webp: 'WebP', lossless: 'Lossless', png: 'PNG',
         };
         const fmtCtl = labelledSelect('Format', 'bwdd-image-format', [
-            ['jpeg', 'JPEG — smallest'],
-            ['webp', 'WebP — smaller, slower'],
-            ['lossless', 'Lossless — perfect copy'],
-            ['png', 'PNG — largest'],
+            ['jpeg', 'JPEG (smallest)'],
+            ['webp', 'WebP (smaller, slower)'],
+            ['lossless', 'Lossless (perfect copy)'],
+            ['png', 'PNG (largest)'],
         ], 'Page image format');
         const qCtl = labelledSelect('Quality', 'bwdd-image-quality', [
             ['0.95', 'Highest'], ['0.92', 'High (default)'],
@@ -5069,7 +5069,7 @@
                 } catch (e) {}
             }
             const c = refreshImageCodec();
-            // Quality does nothing for the lossless settings — hide it rather
+            // Quality does nothing for the lossless settings, hide it rather
             // than offer a control with no effect.
             qCtl.row.style.display = c.lossless ? 'none' : 'flex';
             fmtSummary.textContent = 'Image format · ' + FORMAT_LABELS[c.fmt] +
@@ -5142,7 +5142,7 @@
         root.append(head, body);
         document.documentElement.appendChild(root);
         // The bridge dot is first updated above (buildUI), but that call runs
-        // before root is connected and bails at the `!root.isConnected` guard —
+        // before root is connected and bails at the `!root.isConnected` guard ,
         // so refresh it now that the panel is actually in the document, instead
         // of waiting for the first 10 s interval tick.
         try { updateBridgeDot(); } catch (e) {}
@@ -5154,7 +5154,7 @@
         edgeTab.className = 'bwdd-edge-tab';
         edgeTab.setAttribute('aria-label', 'Show the BookWalker Native Downloader panel');
         edgeTab.title = 'Show the BookWalker Native Downloader panel';
-        edgeTab.textContent = '\u00AB';   // fancy "<<" — pull the panel back in from the right
+        edgeTab.textContent = '\u00AB';   // fancy "<<", pull the panel back in from the right
         edgeTab.style.display = 'none';
         document.documentElement.appendChild(edgeTab);
 
@@ -5329,7 +5329,7 @@
         // resized with the corner grip instead.
 
         // Keyboard shortcut: Escape toggles collapse. Named so the close
-        // button can remove it — a closed panel must not keep a window-level
+        // button can remove it, a closed panel must not keep a window-level
         // listener alive for the life of the tab.
         function onPanelKeydown(e) {
             if (e.key !== 'Escape') return;
@@ -5368,7 +5368,7 @@
 
     // Three-value Mokuro progress: done / received / total.
     // fillBg (faint) = pages received by the bridge; fill (solid) = pages
-    // actually OCR'd. No flicker — every update sets all three consistently.
+    // actually OCR'd. No flicker, every update sets all three consistently.
     function updateMokuroBar(bar, done, received, total) {
         if (!bar || !bar.fill) return;
         const t = total || 1;
@@ -5416,7 +5416,7 @@
         if (det) el.appendChild(det);
     }
     // Append diagnostics to an already-set status line (used when a run fully
-    // succeeded but some pages needed retries — nothing silently swallowed).
+    // succeeded but some pages needed retries, nothing silently swallowed).
     function appendRunDetails(el, rawLines, label) {
         if (!el) return;
         const det = makeTechDetails(rawLines, label);
@@ -5438,12 +5438,12 @@
     // Refresh the CloudFront auth policy, coalesced so concurrent callers share
     // one in-flight request. Two viewer endpoints mint a fresh auth_info;
     // refreshAuthBest() tries 'pb' first, then 'c':
-    //   'pb' — POST a plausible reading-position bookmark to /browserWebApi/pb
+    //   'pb', POST a plausible reading-position bookmark to /browserWebApi/pb
     //          (the viewer's own token-renewal channel). This mirrors what the
     //          viewer sends while reading and therefore also moves your reading
-    //          progress on BookWalker's side each time — the fake position
+    //          progress on BookWalker's side each time, the fake position
     //          cycles monotonically within the book to stay plausible.
-    //   'c'  — GET /browserWebApi/c with the params the viewer sends when
+    //   'c' , GET /browserWebApi/c with the params the viewer sends when
     //          opening a book; a fresh reply replaces auth/baseUrl/cti.
     function refreshAuthOnce(mode) {
         if (!authRefreshPromise) {
@@ -5675,7 +5675,7 @@
         }
     }
 
-    // Upload the cover (<safe_title>.webp — the first page, no OCR needed)
+    // Upload the cover (<safe_title>.webp, the first page, no OCR needed)
     // the moment it's descrambled, so the destination folder + Upload bar show
     // activity before OCR finishes. Feeds the same per-run upload bar feed the
     // finalize phase uses (name matches the bridge's file_base.webp, so the
@@ -5709,10 +5709,10 @@
     // Mokuro bar polled until the stream closes. Returns { result, plan }.
     async function finalizeOcrSession(mokuroSessionId, ui, barUpload, barMokuro, total, sharedFeed) {
         const plan = await resolveUploadChoice(ui).catch(() => ({ method: null, label: null, localDir: null }));
-        // The 4th stage only uploads when the destination is remote — for
+        // The 4th stage only uploads when the destination is remote, for
         // local saves it stores to disk, so name the bar honestly. If the
         // early cover upload already started the bar on this feed, don't
-        // clobber it — keep the visible progress and just seed the rest.
+        // clobber it, keep the visible progress and just seed the rest.
         barUpload.labName.textContent = '4. ' + (plan.method === 'local' ? 'Store' : 'Upload');
         const uploadFeed = sharedFeed || makeUploadBarUpdater(barUpload);
         if (!sharedFeed || !sharedFeed.hasAny || !sharedFeed.hasAny()) {
@@ -5727,7 +5727,7 @@
                 if (stage === 'upload' && msg && Array.isArray(msg.files) && uploadFeed.seed) {
                     uploadFeed.seed(msg.files);
                 }
-                // Keep the file count + total size on the bar when done —
+                // Keep the file count + total size on the bar when done ,
                 // final label reads e.g. "3/3 · 100% · 145.0 MB / 145.0 MB".
                 if (stage === 'done' && uploadFeed.summary) {
                     const s = uploadFeed.summary();
@@ -5742,7 +5742,7 @@
             // moving while the NDJSON finalize stream is open; the bridge also
             // publishes live upload progress to the same /status endpoint
             // (bytes/percent/speed per in-flight file), which we feed into the
-            // same accumulator — that keeps the bar moving even with older
+            // same accumulator, that keeps the bar moving even with older
             // bridges that buffer their NDJSON upload frames.
             const poll = setInterval(async () => {
                 try {
@@ -5812,7 +5812,7 @@
                 throw new Error(MOKURO_BRIDGE_OFFLINE_MSG);
             }
             // Don't start a capture while the bridge is still working on a
-            // previous run — wait until it reports idle.
+            // previous run, wait until it reports idle.
             if (!(await waitForBridgeIdle(60000))) {
                 throw new Error('The Mokuro Bridge is still busy with a previous OCR/upload — wait for it to finish, then try again.');
             }
@@ -5884,7 +5884,7 @@
                 const el = (performance.now() - t1) / 1000;
                 // Download bar tracks bytes/pages fetched from the CDN;
                 // Descramble bar tracks pages actually processed (written to the
-                // zip / sent to OCR) — they diverge naturally instead of moving
+                // zip / sent to OCR), they diverge naturally instead of moving
                 // identically.
                 setBar(barDownload, (fetched / total) * 100, fetched + '/' + total);
                 setBar(barDescramble, (okIdx.size / total) * 100, okIdx.size + '/' + total);
@@ -5914,7 +5914,7 @@
                     msgOcrPartial(missingOcr, total),
                     errors);
             } else {
-                // Full volume — confirm where it was stored/uploaded.
+                // Full volume, confirm where it was stored/uploaded.
                 if (plan && plan.method === 'local') {
                     const localPath = storedPathOf(result) || plan.localDir;
                     if (localPath) details.textContent = msgStoredLocal(localPath);
@@ -5973,7 +5973,7 @@
     function resetRunState() {
         // All captured state below is per-book. If this tab has moved to a
         // different cid since the last run (SPA-style navigation), the cached
-        // config/keys belong to the previous book — reusing them would silently
+        // config/keys belong to the previous book, reusing them would silently
         // download the wrong pages (every CDN path 403s with a confusing
         // "session auth expired" message). Detect that and reset the config too.
         const currentCid = (new URLSearchParams(location.search)).get('cid') || '';
@@ -6000,7 +6000,7 @@
         // second download can start concurrently (the 10 s bridge-health tick
         // must never re-enable anything mid-run) and the destination cannot
         // change under the run. Any previous run's reader/stored buttons are
-        // cleared too — they return only on a fresh OCR success — and the
+        // cleared too, they return only on a fresh OCR success, and the
         // Upload bar + status text from the last run are reset.
         ui.setRunLock(true);
         ui.hideReaderButton();
@@ -6091,7 +6091,7 @@
                     throw new Error(MOKURO_BRIDGE_OFFLINE_MSG);
                 }
                 // Don't start a capture while the bridge is still working on a
-                // previous run — wait until it reports idle.
+                // previous run, wait until it reports idle.
                 if (!(await waitForBridgeIdle(60000))) {
                     throw new Error('The Mokuro Bridge is still busy with a previous OCR/upload — wait for it to finish, then try again.');
                 }
@@ -6164,7 +6164,7 @@
                 setBar(barDownload, (dlCount / total) * 100, dlCount + '/' + total);
                 setBar(barDescramble, (deCount / total) * 100, deCount + '/' + total);
                 // NOTE: the Mokuro bar is owned by the dedicated bridge status
-                // poll (updateMokuroBar, done/received/total) — never write it
+                // poll (updateMokuroBar, done/received/total), never write it
                 // from here or the two writers fight and the label flickers.
             }
 
@@ -6445,7 +6445,7 @@
                 });
             }
             if (cachedCount) {
-                // Cache hits are pages fetched in an earlier run — count them as
+                // Cache hits are pages fetched in an earlier run, count them as
                 // fetched so the Download bar starts at the same baseline as the
                 // Descramble bar (okIdx above) instead of showing only the pages
                 // newly fetched this run. barDownload = cached + freshly fetched.
@@ -6456,7 +6456,7 @@
             // Look for the optional local fetch proxy before sizing the
             // download window: every extra port it exposes is another 6 sockets.
             try { await probeFetchProxy(); } catch (e) {}
-            // Opt-in HTTP/2 edge mirror — the only route past the 6-socket cap
+            // Opt-in HTTP/2 edge mirror, the only route past the 6-socket cap
             // that needs nothing running locally.
             try { await probeEdgeMirror(); } catch (e) {}
             // Then try the no-setup multiplier: a trailing-dot hostname, if the
@@ -6518,7 +6518,7 @@
                         msgOcrPartial(missingOcr, total),
                         errors);
                 } else {
-                    // Full volume — confirm where it was stored/uploaded.
+                    // Full volume, confirm where it was stored/uploaded.
                     if (plan && plan.method === 'local') {
                         const localPath = storedPathOf(result) || plan.localDir;
                         if (localPath) details.textContent = msgStoredLocal(localPath);
@@ -6584,7 +6584,7 @@
         } catch (e) {
             details.textContent = 'Error: ' + (e && e.message ? e.message : 'something went wrong — see the browser console for details.');
         } finally {
-            // Re-derive the enabled state from the bridge health — if the
+            // Re-derive the enabled state from the bridge health, if the
             // bridge dropped mid-run, the OCR button stays disabled afterwards.
             ui.setRunLock(false);
             // memory hygiene: a finished download must not keep gigabytes of
@@ -6668,12 +6668,12 @@
                 await new Promise(r => setTimeout(r, 500));
                 // Keep the archive-name field's default in sync with the book
                 // shown in the reader (safe: it never overwrites a name the
-                // user typed — see syncArchiveDefault).
+                // user typed, see syncArchiveDefault).
                 try { ui.syncArchiveDefault(state.cti || document.title || ''); } catch (e) {}
                 if (!statsKicked) {
                     // Start the catalog lookups as soon as the series name is
-                    // known (state.cti) — not once the whole preview finishes
-                    // decoding — and only once; each card renders on its own.
+                    // known (state.cti), not once the whole preview finishes
+                    // decoding, and only once; each card renders on its own.
                     try {
                         const sv = splitSeriesVolume(state.cti || document.title || '');
                         if (sv.series) {
