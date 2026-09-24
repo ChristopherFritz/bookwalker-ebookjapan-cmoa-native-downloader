@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BookWalker Native Downloader
 // @namespace    http://tampermonkey.net/
-// @version      1.5.0
+// @version      1.5.1
 // @description  Saves a book from the BookWalker viewer as a ZIP or CBZ of full-resolution page images, fetched from the CDN and unscrambled offline. Optional Japanese OCR through mokuro-bridge, with upload to MEGA, Google Drive or OneDrive.
 // @author       GolyBidoof
 // @homepageURL  https://github.com/GolyBidoof/bookwalker-native-downloader
@@ -51,7 +51,7 @@
             const v = (typeof GM_info !== 'undefined') && GM_info.script && GM_info.script.version;
             if (v) return v;
         } catch (e) { /* not in a userscript manager (e.g. injected in a test) */ }
-        return '1.5.0';   // keep in step with @version in the metadata block
+        return '1.5.1';   // keep in step with @version in the metadata block
     })();
     const BWDD_AUTHOR = 'GolyBidoof';
     // Where the panel's GitHub button points.
@@ -60,7 +60,6 @@
     // =====================================================================
     // 1. Capture the viewer's own network responses (browser data reuse)
     // =====================================================================
-    const SERVER = 'https://viewer.bookwalker.jp';
     const state = {
         cid: (new URLSearchParams(location.search)).get('cid') || '',
         fileBases: {},
@@ -113,7 +112,6 @@
         IMAGE_CODEC = resolveImageCodec();
         return IMAGE_CODEC;
     }
-    const EST_BYTES_PER_PAGE = 350 * 1024;    // rough per-page size used for size estimates
     // Debug-only: internals on window.* are exposed only when the viewer URL
     // carries ?bwddDebug=1 (used while validating against HAR captures), so
     // page scripts can't reach mutable script state by default.
@@ -199,23 +197,65 @@
             } catch (e) { reject(e); }
         });
     }
-    // Cache entries are {blob, ts} so we can enforce a TTL (entries older than
-    // PAGE_CACHE_TTL_MS are purged) and a size cap, the IndexedDB cache must
-    // never grow unboundedly and eat the browser's memory/disk.
+    // Cache entries are {blob, ts, crc} so we can enforce a TTL (entries older
+    // than PAGE_CACHE_TTL_MS are purged) and a size cap, the IndexedDB cache
+    // must never grow unboundedly and eat the browser's memory/disk. Keys
+    // include the image codec and quality so changing formats cannot reuse the
+    // wrong output blob or CRC.
     const PAGE_CACHE_TTL_MS = 20 * 60 * 1000;   // 20 minutes
     const PAGE_CACHE_MAX_ENTRIES = 4000;        // safety cap (~3 GB at 700 KB/page)
-    async function cachePage(cid, index, blob) {
+    const PAGE_CACHE_PRUNE_INTERVAL_MS = 30 * 1000;
+    const cachedPageCrc = new WeakMap();
+    let pageCachePruneTimer = null;
+    let pageCachePruneInFlight = null;
+    let pageCachePruneRequested = false;
+    let lastPageCachePruneAt = 0;
+    function schedulePageCachePrune(delayMs) {
+        // A full cursor scan after every put turns a 300-page run into hundreds
+        // of overlapping O(cache-size) scans. Keep at most one periodic prune.
+        if (pageCachePruneInFlight) {
+            // A write that arrived while the cursor was walking would otherwise
+            // leave no future trigger once that walk finishes.
+            pageCachePruneRequested = true;
+            return;
+        }
+        if (pageCachePruneTimer !== null) return;
+        const earliest = lastPageCachePruneAt + PAGE_CACHE_PRUNE_INTERVAL_MS;
+        const delay = Math.max(delayMs || 0, earliest - Date.now());
+        pageCachePruneTimer = setTimeout(() => {
+            pageCachePruneTimer = null;
+            lastPageCachePruneAt = Date.now();
+            pageCachePruneInFlight = prunePageCache();
+            const done = () => {
+                pageCachePruneInFlight = null;
+                if (pageCachePruneRequested) {
+                    pageCachePruneRequested = false;
+                    schedulePageCachePrune();
+                }
+            };
+            pageCachePruneInFlight.then(done, done);
+        }, delay);
+    }
+    function pageCacheKey(cid, index) {
+        const type = (typeof IMAGE_CODEC !== 'undefined' && IMAGE_CODEC.type) || 'image/jpeg';
+        const quality = (typeof IMAGE_CODEC !== 'undefined' && IMAGE_CODEC.quality) || '';
+        return cid + ':' + index + ':' + type + ':' + quality;
+    }
+    async function cachePage(cid, index, blob, crc) {
         try {
             const db = await openPageDB();
-            const key = cid + ':' + index;
+            const key = pageCacheKey(cid, index);
+            const record = { blob, ts: Date.now() };
+            if (Number.isInteger(crc)) record.crc = crc;
             await new Promise((res, rej) => {
                 const tx = db.transaction('pages', 'readwrite');
-                tx.objectStore('pages').put({ blob, ts: Date.now() }, key);
+                tx.objectStore('pages').put(record, key);
                 tx.oncomplete = () => res(true);
                 tx.onerror = () => rej(tx.error);
             });
-            // opportunistic housekeeping: cap size + drop expired entries
-            prunePageCache();
+            // Periodic, single-flight housekeeping: cap size and drop expired
+            // entries without competing with every page's IndexedDB put.
+            schedulePageCachePrune();
             return true;
         } catch (e) { return false; }
     }
@@ -224,11 +264,14 @@
             const db = await openPageDB();
             const v = await new Promise((res) => {
                 const tx = db.transaction('pages', 'readonly');
-                const rq = tx.objectStore('pages').get(cid + ':' + index);
+                const rq = tx.objectStore('pages').get(pageCacheKey(cid, index));
                 rq.onsuccess = () => res(rq.result || null);
                 rq.onerror = () => res(null);
             });
-            if (v && v.blob) return v.blob;
+            if (v && v.blob) {
+                if (Number.isInteger(v.crc)) cachedPageCrc.set(v.blob, v.crc);
+                return v.blob;
+            }
             return null;
         } catch (e) { return null; }
     }
@@ -240,24 +283,19 @@
                 const tx = db.transaction('pages', 'readwrite');
                 const st = tx.objectStore('pages');
                 const req = st.openCursor();
-                let count = 0;
-                let oldestKey = null, oldestTs = Infinity;
                 req.onsuccess = () => {
                     const cur = req.result;
                     if (!cur) { res(true); return; }
-                    count++;
                     const val = cur.value;
                     if (val && val.ts && (now - val.ts) > PAGE_CACHE_TTL_MS) {
                         cur.delete();
-                    } else if (val && val.ts && val.ts < oldestTs) {
-                        oldestTs = val.ts; oldestKey = cur.key;
                     }
                     cur.continue();
                 };
                 tx.oncomplete = () => res(true);
                 req.onerror = () => res(true);
             });
-            // hard cap: if still too many entries, drop oldest until under the cap
+            // hard cap: if still too many entries, drop excess keys
             await new Promise((res) => {
                 const tx = db.transaction('pages', 'readwrite');
                 const st = tx.objectStore('pages');
@@ -281,6 +319,19 @@
     }
     async function clearPageCache() {
         try {
+            if (pageCachePruneTimer !== null) {
+                clearTimeout(pageCachePruneTimer);
+                pageCachePruneTimer = null;
+            }
+            if (pageCachePruneInFlight) {
+                try { await pageCachePruneInFlight; } catch (e) {}
+                pageCachePruneInFlight = null;
+            }
+            if (pageCachePruneTimer !== null) {
+                clearTimeout(pageCachePruneTimer);
+                pageCachePruneTimer = null;
+            }
+            pageCachePruneRequested = false;
             const db = await openPageDB();
             await new Promise((res, rej) => {
                 const tx = db.transaction('pages', 'readwrite');
@@ -610,19 +661,6 @@
         const [content, clen] = st;
         return [new TextDecoder('utf-8').decode(content.slice(0, clen))];
     }
-    function decodeConfig(content) {
-        const DATA_STR = '"data":"';
-        const dataOffset = content.indexOf(DATA_STR) + DATA_STR.length;
-        const dataEndOffset = content.indexOf('"', dataOffset);
-        if (dataEndOffset - dataOffset < 128) throw new Error('Configuration pack format invalid or truncated.');
-        const fk = processFilename('configuration_pack.json');
-        let st = A8j(content, dataOffset, dataEndOffset);
-        st = A3b(0, st); st = B0p(fk, st); st = A7L(fk, st); st = A6I(fk, st); st = A2F(st);
-        st = B0L(fk, st); st = A3b(1, st); st = A3b(2, st); st = A3b(3, st); st = tB0l(fk, st);
-        const [jsonStr] = A6e(st);
-        return JSON.parse(jsonStr);
-    }
-
     // =====================================================================
     // 3. Tile shuffle & descramble arithmetic (A9p)
     // =====================================================================
@@ -933,7 +971,6 @@
     // =====================================================================
     function buildWorkerSource() {
         const deps = [
-            'const MASK32 = 0xFFFFFFFF;',
             'const AUTH_PARAM_KEYS = ' + JSON.stringify(AUTH_PARAM_KEYS) + ';',
             'const B2Y_TRIPLES = ' + JSON.stringify(B2Y_TRIPLES) + ';',
             'const XSHIFT = [' + XSHIFT.map(f => f.toString()).join(',') + '];',
@@ -955,9 +992,40 @@
         return deps.join('\n');
     }
 
+    // Two pages share one worker's native decode/encode queue concurrently.
+    // This overlaps the asynchronous codec stages without allowing independent
+    // onmessage handlers to race on one canvas. A two-page batch measured ~10%
+    // faster than one page per worker on 14 cores while keeping the same number
+    // of pages in flight and producing byte-identical output.
+    const WORKER_BATCH_SIZE = 2;
+
+    function workerBatchSize(type) {
+        // JPEG is the default and benefits from two overlapping codec jobs.
+        // Lossless WebP/PNG encoders have much higher peak memory/CPU cost, so
+        // keep a conservative single-page queue for those formats.
+        return type === 'image/jpeg' ? WORKER_BATCH_SIZE : 1;
+    }
+
     function workerMain() {
-        self.onmessage = async (ev) => {
-            const { id, relPath, seeds, auth, baseUrl, q, fmt, timeoutMs, blob: inputBlob } = ev.data;
+        let crcTable = null;
+        async function crcForZip(blob) {
+            if (!crcTable) {
+                crcTable = new Int32Array(256);
+                for (let n = 0; n < 256; n++) {
+                    let c = n;
+                    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+                    crcTable[n] = c;
+                }
+            }
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let crc = -1;
+            for (let i = 0; i < bytes.length; i++) {
+                crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 255];
+            }
+            return (crc ^ -1) >>> 0;
+        }
+        async function processPage(data) {
+            const { id, relPath, seeds, auth, baseUrl, q, fmt, timeoutMs, needCrc, blob: inputBlob } = data;
             const outType = fmt || 'image/jpeg';
             try {
                 let blob = inputBlob;
@@ -973,6 +1041,10 @@
                         const timer = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
                         try {
                             res = await fetch(url, { credentials: 'omit', signal: ctrl.signal });
+                            if (res && res.ok) {
+                                try { blob = await res.blob(); }
+                                catch (e) { lastErr = e; res = null; }
+                            }
                         } catch (e) {
                             lastErr = e;
                             res = null;
@@ -982,10 +1054,9 @@
                         if (res && (res.ok || res.status === 403)) break;
                         await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
                     }
-                    if (res && res.status === 403) { self.postMessage({ id, error: 'auth-expired' }); return; }
+                    if (res && res.status === 403) return { id, error: 'auth-expired' };
                     if (!res) throw lastErr || new Error('fetch failed after retries');
                     if (!res.ok) throw new Error('HTTP ' + res.status);
-                    blob = await res.blob();
                 }
                 const bmp = await createImageBitmap(blob);
                 const W = bmp.width, H = bmp.height;
@@ -998,8 +1069,9 @@
                     // to produce a slightly worse copy of the bytes we already
                     // hold, so hand the original straight back.
                     if (bmp.close) bmp.close();
-                    self.postMessage({ id, blob });
-                    return;
+                    const unchanged = { id, blob };
+                    if (needCrc) unchanged.crc = await crcForZip(blob);
+                    return unchanged;
                 }
                 const canvas = new OffscreenCanvas(W, H);
                 const ctx = canvas.getContext('2d');
@@ -1029,84 +1101,191 @@
                 } else {
                     outBlob = await new Promise((res2, rej) => outCanvas.toBlob(b => b ? res2(b) : rej(new Error('toBlob')), outType, q));
                 }
-                self.postMessage({ id, blob: outBlob });
+                const result = { id, blob: outBlob };
+                if (needCrc) result.crc = await crcForZip(outBlob);
+                return result;
             } catch (e) {
                 const msg = String((e && e.message) || e);
-                self.postMessage({ id, error: /abor/i.test(msg) ? 'timeout' : msg });
+                return { id, error: /abor/i.test(msg) ? 'timeout' : msg };
             }
+        }
+
+        self.onmessage = async (ev) => {
+            const isBatch = Array.isArray(ev.data.jobs);
+            const jobs = isBatch ? ev.data.jobs : [ev.data];
+            // processPage allocates an independent bitmap/canvas per item, so
+            // Promise.all overlaps codec work without sharing mutable surfaces.
+            // Acknowledge each result as soon as it finishes: if a sibling hangs,
+            // the pool can commit this page and time out only the unfinished one.
+            if (!isBatch) {
+                self.postMessage(await processPage(ev.data));
+                return;
+            }
+            await Promise.all(jobs.map(async job => {
+                const result = await processPage(job);
+                self.postMessage({ batchId: ev.data.batchId, result });
+            }));
         };
     }
 
-    // The number of decode workers a run will spawn. Shared by the pre-flight
-    // indicator and the pool itself so the panel cannot promise one number and
-    // start another. Decode+encode is ~83% of a page's worker time, so this is
-    // what sets the ceiling (measured on 14 cores: 80 pages/s at 4 workers,
-    // 160 at 12, 188 at 32; the old cap of 24 left throughput on the table).
+    // One persistent worker per logical core (capped at 16), each processing
+    // two pages concurrently. This keeps peak page concurrency at the previous
+    // 2x-cores setting, but measured faster because native JPEG stages overlap.
+    // The pre-flight indicator and the pool both call this helper so they cannot
+    // promise one worker count and start another.
     function workerPoolSize() {
         let cores = 8;
         try { cores = navigator.hardwareConcurrency || 8; } catch (e) {}
-        return Math.min(Math.max(4, cores * 2), 32);
+        return Math.min(Math.max(4, cores), 16);
     }
 
-    function makePool(size, workerSrc, onDone, jobTimeoutMs) {
+    function makePool(size, workerSrc, onDone, jobTimeoutMs, requestedBatchSize) {
+        const batchSize = Math.max(1, Math.min(4, requestedBatchSize || WORKER_BATCH_SIZE));
         const queue = [];
         const workers = [];
         const timers = new Map();
+        const workerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
+        let nextBatchId = 1;
+        let pumpScheduled = false;
 
-        function spawn() {
-            const w = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' })));
+        function messageFor(job) {
+            const message = {
+                id: job.id, relPath: job.relPath, seeds: job.seeds,
+                q: job.q, fmt: job.fmt, needCrc: !!job.needCrc, timeoutMs: jobTimeoutMs,
+            };
+            // The main-thread prefetcher has already selected a transport lane
+            // and downloaded this page. Blob is structured-cloneable (not
+            // Transferable); passing it avoids an explicit ArrayBuffer conversion
+            // and, in current browsers, can share immutable backing storage.
+            // Either way it avoids a second request through the six-socket origin.
+            if (job.blob) message.blob = job.blob;
+            else {
+                message.auth = job.auth;
+                message.baseUrl = job.baseUrl;
+            }
+            return message;
+        }
+        function clearJobTimer(id) {
+            const timer = timers.get(id);
+            if (timer) clearTimeout(timer);
+            timers.delete(id);
+        }
+        function replaceWorker(w) {
+            const idx = workers.indexOf(w);
+            if (idx !== -1) workers[idx] = spawn();
+            try { w.terminate(); } catch (e) {}
+        }
+        function failWorker(w, error) {
+            const ids = w.jobIds.slice();
             w.busy = false;
-            w.jobId = null;
+            w.batchId = null;
+            w.hadTimeout = false;
+            w.jobIds = [];
+            for (const id of ids) {
+                clearJobTimer(id);
+                onDone({ id, error });
+            }
+            replaceWorker(w);
+            pump();
+        }
+        function timeoutJob(w, id) {
+            if (!w.jobIds.includes(id)) return;
+            clearJobTimer(id);
+            w.jobIds = w.jobIds.filter(jobId => jobId !== id);
+            w.hadTimeout = true;
+            onDone({ id, error: 'timeout' });
+            if (w.jobIds.length === 0) releaseWorker(w);
+        }
+        function releaseWorker(w) {
+            w.busy = false;
+            w.batchId = null;
+            const recycle = w.hadTimeout;
+            w.hadTimeout = false;
+            // A timed-out page may still own native codec work. Preserve every
+            // sibling that did finish, but never reuse that worker.
+            if (recycle) replaceWorker(w);
+            pump();
+        }
+        function spawn() {
+            const w = new Worker(workerUrl);
+            w.busy = false;
+            w.batchId = null;
+            w.hadTimeout = false;
+            w.jobIds = [];
             w.onmessage = (ev) => {
-                const id = ev.data && ev.data.id;
-                const t = timers.get(id); if (t) { clearTimeout(t); timers.delete(id); }
-                w.busy = false; w.jobId = null;
-                onDone(ev.data);
-                pump();
+                const result = ev.data && ev.data.result ? ev.data.result : ev.data;
+                if (!result || result.id == null || !w.jobIds.includes(result.id)) return;
+                if (ev.data.batchId != null && ev.data.batchId !== w.batchId) return;
+                if (!result.error && !(result.blob instanceof Blob)) {
+                    clearJobTimer(result.id);
+                    w.jobIds = w.jobIds.filter(id => id !== result.id);
+                    onDone({ id: result.id, error: 'Worker returned no image Blob' });
+                    if (w.jobIds.length === 0) releaseWorker(w);
+                    return;
+                }
+                clearJobTimer(result.id);
+                w.jobIds = w.jobIds.filter(id => id !== result.id);
+                onDone(result);
+                if (w.jobIds.length === 0) releaseWorker(w);
             };
-            w.onerror = () => {
-                const id = w.jobId;
-                const t = timers.get(id); if (t) { clearTimeout(t); timers.delete(id); }
-                w.busy = false; w.jobId = null;
-                const idx = workers.indexOf(w);
-                if (idx !== -1) workers[idx] = spawn();
-                try { w.terminate(); } catch (e2) {}
-                onDone({ id, error: 'worker crash' });
-                pump();
-            };
+            w.onerror = () => failWorker(w, 'worker crash');
             return w;
         }
         for (let i = 0; i < size; i++) workers.push(spawn());
 
         function pump() {
+            let retry = false;
             for (const w of workers) {
                 if (w.busy) continue;
-                const job = queue.shift();
-                if (!job) return;
+                const jobs = [];
+                while (jobs.length < batchSize && queue.length) jobs.push(queue.shift());
+                if (!jobs.length) break;
                 w.busy = true;
-                w.jobId = job.id;
-                const timer = setTimeout(() => {
-                    timers.delete(job.id);
-                    w.busy = false; w.jobId = null;
-                    const idx = workers.indexOf(w);
-                    if (idx !== -1) workers[idx] = spawn();
-                    try { w.terminate(); } catch (e2) {}
-                    onDone({ id: job.id, error: 'timeout' });
-                    pump();
-                }, jobTimeoutMs);
-                timers.set(job.id, timer);
+                w.jobIds = jobs.map(job => job.id);
+                const batchId = nextBatchId++;
+                w.batchId = batchId;
+                w.hadTimeout = false;
+                for (const job of jobs) {
+                    timers.set(job.id, setTimeout(() => timeoutJob(w, job.id), jobTimeoutMs));
+                }
                 try {
-                    w.postMessage({ id: job.id, relPath: job.relPath, seeds: job.seeds, auth: job.auth, baseUrl: job.baseUrl, q: job.q, fmt: job.fmt, timeoutMs: jobTimeoutMs });
+                    w.postMessage({ batchId, jobs: jobs.map(messageFor) });
                 } catch (e) {
-                    clearTimeout(timer); timers.delete(job.id);
-                    w.busy = false; w.jobId = null;
-                    onDone({ id: job.id, error: 'post failed' });
+                    for (const job of jobs) {
+                        clearJobTimer(job.id);
+                        onDone({ id: job.id, error: 'post failed' });
+                    }
+                    w.busy = false;
+                    w.batchId = null;
+                    w.hadTimeout = false;
+                    w.jobIds = [];
+                    retry = true;
                 }
             }
+            // A failed structured clone leaves this worker idle. Revisit the
+            // queue once so one bad job cannot stall every page behind it.
+            if (retry) schedulePump();
+        }
+        function schedulePump() {
+            if (pumpScheduled) return;
+            pumpScheduled = true;
+            Promise.resolve().then(() => {
+                pumpScheduled = false;
+                pump();
+            });
         }
         return {
-            submit(job) { queue.push(job); pump(); },
-            terminate() { for (const w of workers) { try { w.terminate(); } catch (e) {} } for (const t of timers.values()) clearTimeout(t); timers.clear(); },
+            // Coalesce the runJobs admission loop's synchronous submissions.
+            // Pumping on every submit would defeat batching before the second
+            // page ever reached the queue.
+            submit(job) { queue.push(job); schedulePump(); },
+            terminate() {
+                queue.length = 0;
+                for (const w of workers) { try { w.terminate(); } catch (e) {} }
+                for (const timer of timers.values()) clearTimeout(timer);
+                timers.clear();
+                try { URL.revokeObjectURL(workerUrl); } catch (e) {}
+            },
         };
     }
 
@@ -1114,39 +1293,74 @@
         try {
             if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return false;
             const src = buildWorkerSource();
-            const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+            const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+            const w = new Worker(url);
             w.terminate();
+            URL.revokeObjectURL(url);
             return true;
         } catch (e) { return false; }
     }
 
     async function fetchWithTimeout(url, opts, ms) {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), ms);
-        try {
-            return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
-        } finally {
+        let timer = setTimeout(() => ctrl.abort(), ms);
+        let cleared = false;
+        const clear = () => {
+            if (cleared) return;
+            cleared = true;
             clearTimeout(timer);
+            timer = null;
+        };
+        try {
+            const res = await fetch(url, Object.assign({}, opts, { signal: ctrl.signal }));
+            try { Object.defineProperty(res, '_bwddClearTimeout', { value: clear, configurable: true }); } catch (e) {}
+            for (const name of ['arrayBuffer', 'blob', 'formData', 'json', 'text']) {
+                if (typeof res[name] !== 'function') continue;
+                const original = res[name].bind(res);
+                try {
+                    Object.defineProperty(res, name, {
+                        configurable: true,
+                        value: async (...args) => {
+                            try { return await original(...args); }
+                            finally { clear(); }
+                        },
+                    });
+                } catch (e) {
+                    clear();
+                }
+            }
+            return res;
+        } catch (e) {
+            clear();
+            throw e;
         }
+    }
+
+    async function releaseResponse(res) {
+        try { if (res && res.body && res.body.cancel) await res.body.cancel(); } catch (e) {}
+        try { if (res && res._bwddClearTimeout) res._bwddClearTimeout(); } catch (e) {}
     }
 
     // Chrome allows 6 concurrent HTTP/1.1 connections per origin (scheme + host
     // + PORT), and the CDN is a single HTTP/1.1 host, so the page alone is pinned
     // at 6. Extra lanes: `gm` (Tampermonkey's own pool) and `px:N` (a local helper
-    // port, a port is part of the origin, so that one scales without limit).
+    // port; each is a separate origin and the script bounds the fan-out).
     const PROXY_HOST = 'http://127.0.0.1:';
     const PROXY_BASE_PORT = 7010;
-    // Chrome runs out of sockets around 300 per profile, so past ~50 ports the
-    // browser is the limit rather than this number.
-    const PROXY_MAX_PORTS = 128;
+    // Each localhost port is a separate HTTP/1.1 origin. Chromium's normal
+    // group limit is 6 per origin; it is not a 300-socket global cap. Keep a
+    // finite bridge fan-out so a misconfigured helper cannot create unbounded
+    // work, while allowing a bridge that exposes more ports to use them.
+    const PROXY_MAX_PORTS = 64;
     // A failing port is parked, not deleted: a wide burst can fail every port at
     // once, and deleting them collapses the run onto the 6-socket page lane.
     const PROXY_ERROR_PARK = 12;     // consecutive failures before a port is parked
     const PROXY_PARK_MAX = 5;        // parks before the port is dropped for good
     const PROXY_PARK_MS = 4000;      // how long to sit out
     let gmUsable = (typeof GM_xmlhttpRequest === 'function');
-    let proxyProbed = false;
     const proxyPorts = [];
+    const proxyPortSources = new Map();
+    const retiredProxyPorts = new Set();
 
     const laneStats = {};
     function addLane(name) {
@@ -1256,13 +1470,14 @@
         return edgeUrl + url.replace(/^https?:\/\/[^/]+/, '');
     }
 
-    function allLanes() {
+    function allLanes(onlineOnly) {
         const out = [{ name: 'page', kind: 'page' }];
         if (gmUsable) out.push({ name: 'gm', kind: 'gm' });
         if (dotLaneEnabled) out.push({ name: 'dot', kind: 'dot' });
         if (edgeLaneEnabled) out.push({ name: 'edge', kind: 'edge' });
         const now = Date.now();
         for (const p of proxyPorts) {
+            if (onlineOnly && !proxyPortOnline(p)) continue;
             const st = laneStats['px:' + p];
             if (st && st.parkUntil > now) continue;   // sitting out a failure burst
             out.push({ name: 'px:' + p, kind: 'proxy', port: p });
@@ -1278,9 +1493,9 @@
     }
     // Effective sockets/streams we can keep busy right now. Used to size the
     // prefetch window so it stays a small multiple of real capacity.
-    function fetchSocketBudget() {
+    function fetchSocketBudget(onlineOnly) {
         let n = 0;
-        for (const L of allLanes()) n += laneCapacity(L);
+        for (const L of allLanes(onlineOnly)) n += laneCapacity(L);
         return n;
     }
 
@@ -1318,15 +1533,65 @@
         });
     }
 
-    function addProxyPorts(list) {
+    function proxyPortOnline(port) {
+        const sources = proxyPortSources.get(port);
+        return !!(sources && (sources.has('bridge') || sources.has('helper')));
+    }
+
+    function activeProxyPortCount() {
+        let n = 0;
+        for (const sources of proxyPortSources.values()) {
+            if (sources.has('bridge') || sources.has('helper')) n++;
+        }
+        return n;
+    }
+
+    function addProxyPorts(list, source) {
+        const key = source || 'legacy';
+        const advertised = new Set();
         for (const raw of (Array.isArray(list) ? list : [])) {
-            if (proxyPorts.length >= PROXY_MAX_PORTS) break;
             const port = parseInt(raw, 10);
-            if (port > 0 && port < 65536 && !proxyPorts.includes(port)) {
+            if (port > 0 && port < 65536) advertised.add(port);
+        }
+        for (const [port, sources] of proxyPortSources) {
+            if (!sources.has(key)) continue;
+            if (advertised.has(port)) sources.add(key);
+            else {
+                sources.delete(key);
+                if (!sources.size) proxyPortSources.delete(port);
+            }
+        }
+        pruneProxyPorts();
+        for (const port of advertised) {
+            if (retiredProxyPorts.has(port)) continue;
+            if (!proxyPorts.includes(port) && activeProxyPortCount() < PROXY_MAX_PORTS) {
                 proxyPorts.push(port);
                 addLane('px:' + port);
             }
+            if (proxyPorts.includes(port)) {
+                const sources = proxyPortSources.get(port) || new Set();
+                sources.add(key);
+                proxyPortSources.set(port, sources);
+            }
         }
+    }
+
+    function pruneProxyPorts() {
+        for (let i = proxyPorts.length - 1; i >= 0; i--) {
+            const port = proxyPorts[i];
+            if (!proxyPortOnline(port) || retiredProxyPorts.has(port)) {
+                proxyPorts.splice(i, 1);
+                delete laneStats['px:' + port];
+            }
+        }
+    }
+
+    function clearProxySource(source) {
+        for (const [port, sources] of proxyPortSources) {
+            sources.delete(source);
+            if (!sources.size) proxyPortSources.delete(port);
+        }
+        pruneProxyPorts();
     }
 
     // mokuro-bridge doubles as an accelerator: when it is running it serves the
@@ -1335,12 +1600,15 @@
     // already runs the bridge for OCR gets the extra lanes with no setup at all.
     // Downloading never *depends* on it, no bridge simply means no lanes.
     async function probeBridgeFetchProxy() {
+        clearProxySource('bridge');
         try {
             const r = await fetchWithTimeout(MOKURO_BRIDGE_URL + '/health',
                 { cache: 'no-store' }, 2500);
             if (!r.ok) return;
             const j = await r.json();
-            if (j && Array.isArray(j.fetchProxyPorts)) addProxyPorts(j.fetchProxyPorts);
+            if (j && Array.isArray(j.fetchProxyPorts) && j.fetchProxyPorts.length) {
+                addProxyPorts(j.fetchProxyPorts, 'bridge');
+            }
         } catch (e) { /* bridge not running */ }
     }
 
@@ -1350,15 +1618,14 @@
     // If the helper had to move off 7010 (port already in use), point the script
     // at it with `window.__bwddProxyBasePort = 7100;` from the console.
     async function probeFetchProxy() {
-        if (proxyProbed) return proxyPorts;
-        proxyProbed = true;
         return await discoverProxyPorts();
     }
 
     // Re-run discovery. The panel's pre-flight indicator uses this so that
-    // starting the bridge *after* the page loaded still lights up the ports;
-    // ports are only ever added, never dropped mid-session.
+    // starting the bridge *after* the page loaded still lights up its ports;
+    // source ownership and retirement decide which lanes remain selectable.
     async function discoverProxyPorts() {
+        clearProxySource('helper');
         let basePort = PROXY_BASE_PORT;
         try {
             if (typeof window !== 'undefined' && window.__bwddProxyBasePort) {
@@ -1376,7 +1643,8 @@
                             ? j.portList
                             : Array.from(
                                 { length: Math.min(PROXY_MAX_PORTS, j.ports || 1) },
-                                (_, i) => basePort + i)
+                                (_, i) => basePort + i),
+                        'helper'
                     );
                 }
             }
@@ -1385,31 +1653,24 @@
         return proxyPorts;
     }
 
-    // Last known bridge reachability, mirrored out of buildUI's poll. Discovered
-    // proxy ports outlive the bridge (they are only ever added, never dropped
-    // mid-run), so this, not the port count, decides what can be promised now.
+    // Last known bridge reachability, mirrored out of buildUI's poll. The
+    // per-port source map decides which discovered proxy lanes are usable now;
+    // this flag describes the bridge/OCR status shown in the panel.
     let laneBridgeOnline = false;
 
-    // Total socket budget the browser will be able to use, given every lane this
-    // session has discovered. Same function the download loop sizes its window
-    // from, so the indicator cannot disagree with the run.
     function capabilitySummary() {
-        const lanes = allLanes();
+        const lanes = allLanes(true);
         const ports = lanes.filter(l => l.kind === 'proxy').length;
-        const sockets = fetchSocketBudget();
-        // What the browser could actually use *right now*. With the bridge down
-        // the proxy lanes are unreachable, so quoting the full budget would be a
-        // promise the run cannot keep.
+        const sockets = fetchSocketBudget(true);
         const offlineSockets = 6 + (gmUsable ? 6 : 0) + (dotLaneEnabled ? 6 : 0) +
             (edgeLaneEnabled ? 100 : 0);
         return {
             ports,
             sockets,
-            // What the run gets with no bridge, so the wording can quote a real
-            // number instead of assuming the page lane's 6.
             withoutBridge: offlineSockets,
-            effectiveSockets: laneBridgeOnline ? sockets : offlineSockets,
+            effectiveSockets: sockets,
             workers: workerPoolSize(),
+            decodePages: workerPoolSize() * workerBatchSize(IMAGE_CODEC.type),
             laneCount: lanes.length,
             bridge: ports > 0,
             bridgeOnline: laneBridgeOnline,
@@ -1422,7 +1683,7 @@
     // pinning to the first one.
     let laneRR = 0;
     function pickLane() {
-        const lanes = allLanes();
+        const lanes = allLanes(true);
         const n = lanes.length;
         let best = null, bestScore = Infinity;
         for (let i = 0; i < n; i++) {
@@ -1466,6 +1727,8 @@
             if (++st.parks >= PROXY_PARK_MAX) {
                 const ix = proxyPorts.indexOf(lane.port);
                 if (ix !== -1) proxyPorts.splice(ix, 1);
+                proxyPortSources.delete(lane.port);
+                retiredProxyPorts.add(lane.port);
                 console.warn('[bwdd] fetch proxy port ' + lane.port + ' retired after repeated parks');
             }
         }
@@ -1480,16 +1743,14 @@
             return await fetchWithTimeout(edgeUrlFor(url), opts, to);
         }
         if (lane.kind === 'dot') {
-            // Same page context and credentials; only the host string differs, so
-            // it is its own site and its own 6 sockets.
             return await fetchWithTimeout(dottedUrl(url), { credentials: 'omit' }, to);
         }
         if (lane.kind === 'proxy') {
             const res = await fetchWithTimeout(proxyUrlFor(lane.port, url), { credentials: 'omit' }, to);
-            // 502 is the helper failing to reach the CDN, a transport problem,
-            // not the CDN's verdict. Real statuses pass through untouched so
-            // cdnFetch's retry logic still sees them.
-            if (res.status === 502) throw new Error('fetch proxy upstream error');
+            if (res.status >= 500 && res.status <= 504) {
+                await releaseResponse(res);
+                throw new Error('fetch proxy transport error ' + res.status);
+            }
             return res;
         }
         return await fetchWithTimeout(url, { credentials: 'omit' }, to);
@@ -1500,21 +1761,19 @@
         return res;
     }
 
-    // Dispatch one request onto the least-utilised lane. Every lane except the
-    // page's own is strictly *additive*: on failure it falls through to the page
-    // lane, so a broken or absent lane can never fail a page or look like a
-    // network block to cdnFetch's rate-limit breaker.
     async function laneFetch(url, timeoutMs) {
         const lane = pickLane();
         const st = laneStats[lane.name];
         const isPage = lane.kind === 'page';
-        // A lane can legitimately answer with a CDN status (403/404) that
-        // cdnFetch must act on, so a non-ok response is returned rather than
-        // thrown, it only counts towards retiring a consistently useless lane.
         const countsNonOk = lane.kind === 'edge' || lane.kind === 'dot';
         st.inflight++;
         try {
             const res = await laneAttempt(lane, url, timeoutMs);
+            if (res && res.status >= 500 && res.status <= 504 &&
+                (lane.kind === 'edge' || lane.kind === 'dot' || lane.kind === 'gm')) {
+                await releaseResponse(res);
+                throw new Error('lane transport HTTP ' + res.status);
+            }
             if (res && res.ok) st.errors = 0;
             else if (countsNonOk && ++st.errors >= laneRetireLimit(lane)) retireLane(lane, null);
             return tagLane(res, lane.name);
@@ -1644,7 +1903,6 @@
     function breakerRemainingMs() { return Math.max(0, rateLimitCooldownUntil - Date.now()); }
 
     let reqsSinceAuth = 0;
-    const REQS_PER_POLICY_HARD = 180;
     const REQS_PER_POLICY_RENEW = 100;
     function authRequestBudgetExhausted() { return reqsSinceAuth >= REQS_PER_POLICY_RENEW; }
     function resetAuthBudget() { reqsSinceAuth = 0; }
@@ -1838,7 +2096,7 @@
     }
     function extractVolumeNumber(title) {
         const t = String(title || '');
-        const full = t.match(/([0-9０-９]+|[０-９]+)/) || t.match(/([0-9]+)/);
+        const full = t.match(/([0-9０-９]+)/);
         if (full) {
             const digits = full[1].replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
             return parseInt(digits, 10);
@@ -2951,22 +3209,33 @@
         return e;
     }
     const enc = new TextEncoder();
+    function zipEntryNumber(path) {
+        const m = String(path || '').match(/page-(\d+)\./i);
+        return m ? Number(m[1]) : Infinity;
+    }
     async function buildStoreZip(entries, onProgress) {
+        const ordered = entries.slice().sort((a, b) => {
+            const byPage = zipEntryNumber(a.path) - zipEntryNumber(b.path);
+            return byPage || String(a.path).localeCompare(String(b.path));
+        });
         const parts = [];
         const centralParts = [];
         let offset = 0;
-        const base = new Date(Date.now() - entries.length * 2000);
-        for (let i = 0; i < entries.length; i++) {
-            const ent = entries[i];
+        const base = new Date(Date.now() - ordered.length * 2000);
+        for (let i = 0; i < ordered.length; i++) {
+            const ent = ordered[i];
             const dos = dosDateTime(new Date(base.getTime() + i * 2000));
             const nameB = enc.encode(ent.path);
-            const ab = await ent.blob.arrayBuffer();
-            const crc = crc32Bytes(ab);
-            const size = ab.byteLength;
-            parts.push(localHeader(nameB, crc, size, dos), ab);
+            const size = ent.blob.size;
+            let crc = Number.isInteger(ent.crc) ? (ent.crc >>> 0) : null;
+            if (crc === null) crc = crc32Bytes(await ent.blob.arrayBuffer());
+            // The worker already read the page to calculate CRC for ZIP runs.
+            // Keep the original Blob as the part instead of retaining a second
+            // full-sized ArrayBuffer for every page until the final Blob is made.
+            parts.push(localHeader(nameB, crc, size, dos), ent.blob);
             centralParts.push(centralEntry(nameB, crc, size, dos, offset));
             offset += 30 + nameB.length + size;
-            if (onProgress) onProgress(i + 1, entries.length);
+            if (onProgress) onProgress(i + 1, ordered.length);
             if ((i & 15) === 15) await new Promise(r => setTimeout(r, 0));
         }
         const cd = new Blob(centralParts);
@@ -4111,8 +4380,6 @@
     const PANEL_COLLAPSED_KEY = 'bwdd-panel-collapsed';
     const PANEL_WIDTH_KEY = 'bwdd-panel-width';   // manual resize, if any
     const PANEL_HEIGHT_KEY = 'bwdd-panel-height';   // manual vertical resize, if any
-    const PANEL_WIDTH_SINGLE = 400;
-    const PANEL_WIDTH_TWOCOL = 640;
 
     function buildUI() {
         injectStyles();
@@ -4266,9 +4533,9 @@
         infoDot.textContent = '?';
         bridgeRow.insertBefore(infoDot, bridgeText);
 
-        const bridgeInfo = document.createElement('div');
-        bridgeInfo.className = 'bwdd-bridge-pop';
-        bridgeInfo.hidden = true;
+        const bridgeInfoPop = document.createElement('div');
+        bridgeInfoPop.className = 'bwdd-bridge-pop';
+        bridgeInfoPop.hidden = true;
         const infoTitle = document.createElement('span');
         infoTitle.className = 'bwdd-bridge-info-title';
         infoTitle.textContent = 'What is the Mokuro Bridge?';
@@ -4332,13 +4599,13 @@
         infoLink.target = '_blank';
         infoLink.rel = 'noopener noreferrer';
         infoLink.textContent = 'Download mokuro-bridge ↗';
-        bridgeInfo.append(infoTitle, mokuroSection, divider1, aboutSection, divider2,
+        bridgeInfoPop.append(infoTitle, mokuroSection, divider1, aboutSection, divider2,
             connSection, divider3, infoLink);
         infoDot.addEventListener('click', (e) => {
             e.stopPropagation();
-            const open = bridgeInfo.hidden;
-            if (open) placePopover(bridgeInfo, bridgeRow, 'left');
-            else bridgeInfo.hidden = true;
+            const open = bridgeInfoPop.hidden;
+            if (open) placePopover(bridgeInfoPop, bridgeRow, 'left');
+            else bridgeInfoPop.hidden = true;
             infoDot.setAttribute('aria-expanded', String(open));
         });
 
@@ -4347,7 +4614,7 @@
         // archive-name popover) instead of pushing the content below it down.
         const bridgeAnchor = document.createElement('div');
         bridgeAnchor.className = 'bwdd-bridge-anchor';
-        bridgeAnchor.append(bridgeRow, bridgeInfo);
+        bridgeAnchor.append(bridgeRow, bridgeInfoPop);
 
         // Human-readable busy reason from the bridge's /health fields.
         function busyReason(info) {
@@ -4373,12 +4640,14 @@
             // up, so it's an "online but unusable for OCR" state, not offline.
             if (ok && bridgeReachableNow) {
                 const info = await refreshBridgeInfo().catch(() => null);
+                const hasBridgePorts = !!(info && Array.isArray(info.fetchProxyPorts) && info.fetchProxyPorts.length);
+                if (!hasBridgePorts) clearProxySource('bridge');
                 // Take the proxy ports from this same /health payload. Re-probing
                 // separately fired two extra requests at a closed port every 10 s,
                 // and the browser logs each refused connection to the console.
-                // (`bridgeInfo` is unusable here: buildUI shadows it with the
-                // popover element.)
-                try { addProxyPorts(info && info.fetchProxyPorts); } catch (e) {}
+                // Use the refreshed /health payload directly; it also carries
+                // the current proxy-port list.
+                try { addProxyPorts(info && info.fetchProxyPorts, 'bridge'); } catch (e) {}
                 mokuroMissing = !!(info && info.mokuro_installed === false);
                 bridgeBusy = !!(info && info.busy);
                 bridgeBusyStage = (info && info.busy_stage) || '';
@@ -4396,6 +4665,7 @@
                     infoMokuro.classList.remove('missing');
                 }
             } else {
+                clearProxySource('bridge');
                 mokuroDetailText = 'Bridge not reachable — start it to check the installed mokuro.';
                 infoMokuro.classList.remove('missing');
             }
@@ -4999,8 +5269,9 @@
             if (c.bridgeOnline) {
                 explain = 'mokuro-bridge is serving ' + c.ports + ' extra local ports. The browser ' +
                     'allows 6 connections per origin, and every port counts as its own origin, so ' +
-                    'this run can keep about ' + c.sockets + ' pages in flight instead of ' +
-                    c.withoutBridge + '.';
+                    'this run has up to ' + c.sockets + ' network sockets instead of ' +
+                    c.withoutBridge + '. Up to ' + c.decodePages + ' pages decode concurrently; ' +
+                    'the fetch window is bounded separately to avoid retaining the whole volume.';
             } else if (c.ports) {
                 explain = 'mokuro-bridge answered earlier (' + c.ports + ' ports) but is not ' +
                     'reachable now, so this run would use ' + c.effectiveSockets + ' connections. ' +
@@ -5009,11 +5280,11 @@
                 // Quote the real count, not "6": with the GM and trailing-dot
                 // lanes the run already has more than the page's own 6.
                 explain = 'mokuro-bridge is not running, so this run uses ' + c.effectiveSockets +
-                    ' browser connections. Starting it adds up to ~288 more, from its own local ' +
-                    'ports. Downloads work the same either way.';
+                    ' browser connections. Starting it adds its advertised local ports, ' +
+                    'worth up to six connections each. Downloads work the same either way.';
             }
-            connBody.textContent = explain + ' ' + c.workers + ' Web Workers unscramble pages as ' +
-                'they arrive; that number follows your CPU, not the bridge.';
+            connBody.textContent = explain + ' ' + c.workers + ' Web Workers unscramble ' +
+                workerBatchSize(IMAGE_CODEC.type) + ' page each concurrently as they arrive; that number follows your CPU, not the bridge.';
         }
 
         // ---- page image format (advanced, collapsed) ----------------------
@@ -5297,7 +5568,7 @@
         // keeps tracking even when the pointer leaves the header).
         head.addEventListener('pointerdown', (e) => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
-            if (e.target.closest('button')) return;
+            if (e.target.closest('button, a')) return;
             dragging = true;
             dragPointerId = e.pointerId;
             pos.x = e.clientX - root.offsetLeft;
@@ -5769,11 +6040,10 @@
     }
 
     async function downloadTrialZip(ui, config, contents, title, sv, mode, details, archiveName) {
-        const { barDownload, barDescramble, barMokuro, barUpload, destSelect, localDirInput } = ui;
+        const { barDownload, barDescramble, barMokuro, barUpload } = ui;
         const zip = mode === 'zip' ? { entries: [] } : null;
         const errors = [];
         const okIdx = new Set();
-        let bytes = 0;
         const t1 = performance.now();
 
         const jobs = [];
@@ -5859,7 +6129,6 @@
                              (pl[0] && pl[0].Page && pl[0].Page.Size);
                     blob = await cropToSize(blob, S);
                     okIdx.add(pageIdx);
-                    bytes += blob.size;
                     fetched++;
                     if (zip) zip.entries.push({ path: 'page-' + String(pageIdx).padStart(4, '0') + '.' + IMAGE_CODEC.ext, blob });
                     if (mode === 'ocr' && mokuroSessionId) {
@@ -5931,11 +6200,6 @@
         }
         if (zip && okIdx.size > 0) {
             const zipEntries = zip.entries.slice();
-            zipEntries.sort((a, b) => {
-                const na = parseInt(a.path.match(/page-(\d+)/)?.[1] || '0', 10);
-                const nb = parseInt(b.path.match(/page-(\d+)/)?.[1] || '0', 10);
-                return na - nb;
-            });
             const zipBlob = await buildStoreZip(zipEntries, (done) => {
                 const pct = Math.round((done / total) * 100);
                 barDownload.fill.style.width = pct + '%';
@@ -5994,7 +6258,7 @@
     }
 
     async function run(ui, mode) {
-        const { details, statsEl, barWrap, barDownload, barDescramble, barMokuro, barUpload, destSelect, localDirInput, btnZip, btnOcr } = ui;
+        const { details, statsEl, barWrap, barDownload, barDescramble, barMokuro, barUpload } = ui;
         let finishedOk = false;
         // Lock the action buttons + destination pickers for the whole run: no
         // second download can start concurrently (the 10 s bridge-health tick
@@ -6008,6 +6272,7 @@
         barUpload.wrap.style.display = 'none';
         details.textContent = '';
         const t0 = performance.now();
+        let cleanupRun = () => {};
         try {
             resetRunState();
             await ensureStateFresh();
@@ -6110,9 +6375,10 @@
 
             const usePool = detectWorkers();
             const poolSize = usePool ? workerPoolSize() : 0;
+            const poolBatchSize = usePool ? workerBatchSize(IMAGE_CODEC.type) : 1;
             const JOB_TIMEOUT = 60000;
             let pool = null;
-            if (usePool) pool = makePool(poolSize, buildWorkerSource(), onDone, JOB_TIMEOUT);
+            if (usePool) pool = makePool(poolSize, buildWorkerSource(), onDone, JOB_TIMEOUT, poolBatchSize);
 
             let authTimers = [];
             const startAuthTimers = () => {
@@ -6130,16 +6396,21 @@
                 authTimers = [];
             };
             startAuthTimers();
+            cleanupRun = () => {
+                stopAuthTimers();
+                if (ocrPoll) clearInterval(ocrPoll);
+                if (pool) pool.terminate();
+            };
 
             let seq = 0;
             const pending = new Map();
             const okIdx = new Set();
             const failedIdx = new Set();
-            let bytes = 0;
             let totalJobsSubmitted = 0;
             const errors = [];
             const ocrBuffer = new Map();
             let nextOcr = 1;
+            let pipelineDrain = null;
 
             async function sendOcrStreaming() {
                 while (true) {
@@ -6155,8 +6426,6 @@
             }
 
             let fetchedCount = 0;
-            let mokuroSent = 0;
-            let mokuroDone = 0;
             function bumpFetched(n) { fetchedCount += n; try { refreshProgress(); } catch (e) {} }
             function refreshProgress() {
                 const deCount = okIdx.size;
@@ -6168,7 +6437,7 @@
                 // from here or the two writers fight and the label flickers.
             }
 
-            function settleJob(job, error, blob) {
+            function settleJob(job, error, blob, crc) {
                 if (job.resolved) return;
                 job.resolved = true;
                 pending.delete(job.id);
@@ -6179,9 +6448,12 @@
                 } else {
                     okIdx.add(job.index);
                     failedIdx.delete(job.index);
-                    bytes += blob.size;
-                    if (zip) zip.entries.push({ path: 'page-' + String(job.index).padStart(4, '0') + '.' + IMAGE_CODEC.ext, blob });
-                    if (state.cid) cachePage(state.cid, job.index, blob);
+                    if (zip) zip.entries.push({
+                        path: 'page-' + String(job.index).padStart(4, '0') + '.' + IMAGE_CODEC.ext,
+                        blob,
+                        crc: Number.isInteger(crc) ? crc : undefined,
+                    });
+                    if (state.cid) cachePage(state.cid, job.index, blob, crc);
                     // Cover = first page: push it to the destination right
                     // away (before OCR finishes) so the folder + upload bar
                     // show life immediately.
@@ -6200,6 +6472,9 @@
                 }
                 if (job._resolve) job._resolve();
                 refreshProgress();
+                if (pipelineDrain) {
+                    try { pipelineDrain(); } catch (e) {}
+                }
             }
 
             function onDone(data) {
@@ -6220,19 +6495,16 @@
                     }).catch(() => settleJob(job, 'Session auth refresh failed', null));
                     return;
                 }
-                settleJob(job, data.error, data.blob);
+                settleJob(job, data.error, data.blob, data.crc);
             }
 
             async function runJobs(jobList) {
                 if (!jobList.length) return;
+                try {
                 totalJobsSubmitted = jobList.length;
                 let prefetchIdx = 0;
                 const ready = [];
-                // Prefetch window follows the real socket budget rather than a
-                // fixed clamp of 64, which threw away most of the parallelism the
-                // extra origins provide. The headroom covers the blob-to-worker
-                // handoff. Override with window.__bwddMaxInflight = 512.
-                const LANE_SLOTS = fetchSocketBudget();
+                const LANE_SLOTS = fetchSocketBudget(true);
                 let inflightCap = 4096;
                 try {
                     if (typeof window !== 'undefined' && window.__bwddMaxInflight > 0) {
@@ -6241,13 +6513,13 @@
                 } catch (e) {}
                 const NETWORK_BURST = Math.max(8, Math.min(inflightCap,
                     LANE_SLOTS + Math.max(8, Math.round(LANE_SLOTS * 0.2))));
+                const PIPELINE_LIMIT = Math.min(NETWORK_BURST, pool
+                    ? Math.max(32, poolSize * poolBatchSize * 12)
+                    : 8);
                 console.info('[bwdd] lanes=' + allLanes().length + ' sockets=' + LANE_SLOTS +
-                    ' in-flight window=' + NETWORK_BURST);
+                    ' in-flight window=' + NETWORK_BURST + ' pipeline cap=' + PIPELINE_LIMIT +
+                    ' workers=' + poolSize + ' batch=' + poolBatchSize);
                 const prefetchInFlight = new Set();
-                const prefetchErrors = [];
-                // relPath -> in-flight Promise. Two jobs can ask for the same
-                // page (retry rounds, duplicate manifest entries); without this
-                // the same file was pulled from the CDN twice.
                 const inflightFetch = new Map();
 
                 const wakeChannel = new MessageChannel();
@@ -6261,6 +6533,10 @@
                     }
                     return wakePromise;
                 }
+                pipelineDrain = () => {
+                    pumpPrefetch();
+                    wake();
+                };
 
                 async function fetchOneBlob(j) {
                     const fKey = j.fid ? j.fid.split('/').pop() : null;
@@ -6296,11 +6572,9 @@
                 async function prefetchOne(j) {
                     try {
                         const r = await dedupeInflight(inflightFetch, j.rel, () => fetchOneBlob(j));
-                        if (r.error) prefetchErrors.push({ fid: j.fid, msg: r.error });
                         ready.push({ job: j, blob: r.blob, error: r.error });
                     } catch (e) {
                         const msg = String((e && e.message) || e);
-                        prefetchErrors.push({ fid: j.fid, msg });
                         ready.push({ job: j, blob: null, error: msg });
                     } finally {
                         // Exactly one progress tick per job, including the
@@ -6314,7 +6588,8 @@
                 function pumpPrefetch() {
                     if (breakerOpen()) return;
                     const burst = effectiveBurst(NETWORK_BURST);
-                    while (prefetchInFlight.size < burst && prefetchIdx < jobList.length) {
+                    while (prefetchInFlight.size < burst && prefetchIdx < jobList.length &&
+                        pending.size + prefetchInFlight.size + ready.length < PIPELINE_LIMIT) {
                         const j = jobList[prefetchIdx++];
                         prefetchInFlight.add(j.index);
                         (async () => { try { await prefetchOne(j); } catch (e) {} })();
@@ -6328,13 +6603,23 @@
 
                 async function consumeOne() {
                     while (consumed < totalJobs) {
+                        // Do not drain ready into an unbounded pool queue. Keep a
+                        // small multiple of worker capacity buffered so network
+                        // stays ahead without retaining the whole volume.
+                        while (pending.size >= PIPELINE_LIMIT) {
+                            await Promise.race([
+                                waitForWake(),
+                                new Promise(r => setTimeout(r, 100)),
+                            ]);
+                        }
                         let item = null;
                         while (!item) {
-                            const idx = ready.findIndex(r => !r.dispatched);
+                            const idx = ready.length ? 0 : -1;
                             if (idx !== -1) {
-                                item = ready[idx];
-                                ready[idx].dispatched = true;
-                            } else if (prefetchInFlight.size === 0 && prefetchIdx >= jobList.length && ready.every(r => r.dispatched)) {
+                                // Remove on dispatch: a `dispatched` flag alone
+                                // kept every source Blob alive until runJobs ended.
+                                item = ready.splice(idx, 1)[0];
+                            } else if (prefetchInFlight.size === 0 && prefetchIdx >= jobList.length && ready.length === 0) {
                                 break;
                             } else if (breakerOpen()) {
                                 const wait = Math.min(breakerRemainingMs(), 3000);
@@ -6351,12 +6636,17 @@
                         consumed++;
                         const j = item.job;
                         const id = ++seq;
-                        const job = { id, index: j.index, fid: j.fid, relPath: j.rel, seeds: j.seeds, auth: state.auth, baseUrl: state.baseUrl, q: IMAGE_CODEC.quality, fmt: IMAGE_CODEC.type, retried: false };
+                        const job = { id, index: j.index, fid: j.fid, relPath: j.rel, seeds: j.seeds, auth: state.auth, baseUrl: state.baseUrl, q: IMAGE_CODEC.quality, fmt: IMAGE_CODEC.type, needCrc: !!zip, retried: false };
                         pending.set(id, job);
                         job._resolve = null;
                         const p = new Promise(res => { job._resolve = res; });
                         promises.push(p);
-                        if (pool && item.blob) {
+                        if (item.error) {
+                            // The prefetch already exhausted its retry/auth path;
+                            // let the outer retry round handle this job instead of
+                            // making a worker fetch the same URL again.
+                            settleJob(job, item.error, null);
+                        } else if (pool && item.blob) {
                             pool.submit({ ...job, blob: item.blob });
                         } else if (pool && !item.blob) {
                             pool.submit(job);
@@ -6401,6 +6691,9 @@
                 // separate origin carries a real share at a similar latency; one
                 // silently sharing another's socket pool stays near 0%.
                 console.info('[bwdd] transport lanes:', laneSummary());
+                } finally {
+                    pipelineDrain = null;
+                }
             }
 
             const allJobs = [];
@@ -6421,8 +6714,11 @@
                     const cached = state.cid ? await getCachedPage(state.cid, cacheKey(idx)) : null;
                     if (cached) {
                         okIdx.add(idx);
-                        bytes += cached.size;
-                        if (zip) zip.entries.push({ path: 'page-' + String(idx).padStart(4, '0') + '.' + IMAGE_CODEC.ext, blob: cached });
+                        if (zip) zip.entries.push({
+                            path: 'page-' + String(idx).padStart(4, '0') + '.' + IMAGE_CODEC.ext,
+                            blob: cached,
+                            crc: cachedPageCrc.get(cached),
+                        });
                         if (mokuroSessionId) { ocrBuffer.set(idx, cached); if (idx === nextOcr) sendOcrStreaming(); }
                         cachedCount++;
                         continue;
@@ -6492,7 +6788,6 @@
                 await runJobs(retryJobs);
                 if (failedIdx.size >= beforeCount && round >= 1) break;
             }
-            if (pool) pool.terminate();
 
             if (mokuroSessionId) {
                 for (let i = 1; i <= total; i++) {
@@ -6551,11 +6846,6 @@
             barDescramble.labRate.textContent = '100%';
 
             const zipEntries = zip.entries.slice();
-            zipEntries.sort((a, b) => {
-                const na = parseInt(a.path.match(/page-(\d+)/)?.[1] || '0', 10);
-                const nb = parseInt(b.path.match(/page-(\d+)/)?.[1] || '0', 10);
-                return na - nb;
-            });
             const totalEntries = zipEntries.length;
             const zipBlob = await buildStoreZip(zipEntries, (done) => {
                 const pct = Math.round((done / totalEntries) * 100);
@@ -6584,18 +6874,15 @@
         } catch (e) {
             details.textContent = 'Error: ' + (e && e.message ? e.message : 'something went wrong — see the browser console for details.');
         } finally {
+            try { cleanupRun(); } catch (e) {}
+            if (finishedOk) await clearPageCache();
             // Re-derive the enabled state from the bridge health, if the
             // bridge dropped mid-run, the OCR button stays disabled afterwards.
             ui.setRunLock(false);
-            // memory hygiene: a finished download must not keep gigabytes of
-            // blobs or an ever-growing IndexedDB cache behind.
-            if (finishedOk) clearPageCache();
-            // Run-local blobs (zip entries, OCR buffers, the ready queue) are
-            // function-scoped and become garbage once run() returns.
         }
     }
 
-    function decodeConfigWithKeys(content) {
+    function decodeConfig(content) {
         const c = String(content || '');
         if (c.indexOf('"data":"') === -1) {
             try {
@@ -6610,6 +6897,9 @@
         const DATA_STR = '"data":"';
         const dataOffset = c.indexOf(DATA_STR) + DATA_STR.length;
         const dataEndOffset = c.indexOf('"', dataOffset);
+        if (dataOffset < DATA_STR.length || dataEndOffset < dataOffset) {
+            throw new Error('Invalid configuration pack');
+        }
         const fk = processFilename('configuration_pack.json');
         let st = A8j(c, dataOffset, dataEndOffset);
         st = A3b(0, st); st = B0p(fk, st); st = A7L(fk, st); st = A6I(fk, st); st = A2F(st);
@@ -6618,7 +6908,6 @@
         state.keys = [st[2], st[3], st[4]];
         return JSON.parse(jsonStr);
     }
-    decodeConfig = decodeConfigWithKeys;
 
     function buildBookPreview() {
         try {
@@ -6659,21 +6948,14 @@
         ui.btnZip.onclick = () => run(ui, 'zip');
         ui.btnOcr.onclick = () => run(ui, 'ocr');
 
-        // purge expired cached pages from previous sessions (memory hygiene)
-        try { prunePageCache(); } catch (e) {}
+        try { schedulePageCachePrune(0); } catch (e) {}
 
         (async () => {
             let statsKicked = false;
             for (let i = 0; i < 40; i++) {
                 await new Promise(r => setTimeout(r, 500));
-                // Keep the archive-name field's default in sync with the book
-                // shown in the reader (safe: it never overwrites a name the
-                // user typed, see syncArchiveDefault).
                 try { ui.syncArchiveDefault(state.cti || document.title || ''); } catch (e) {}
                 if (!statsKicked) {
-                    // Start the catalog lookups as soon as the series name is
-                    // known (state.cti), not once the whole preview finishes
-                    // decoding, and only once; each card renders on its own.
                     try {
                         const sv = splitSeriesVolume(state.cti || document.title || '');
                         if (sv.series) {
@@ -6695,15 +6977,12 @@
     else boot();
 
     if (BWDD_DEBUG) {
-        // pageSeedsNo/b8gNo (not the old pageSeeds/b8g wrappers) so debuggers can
-        // probe any specific page number, not just page 0.
         try { window.__bwdd = { decodeConfig, pageSeedsNo, A9p, b8gNo, state, buildWorkerSource, fetchAndDescramble, cleanTitle, splitSeriesVolume, fsSafePath, zipBaseName, crc32Bytes, buildStoreZip,
-            // live view: IMAGE_CODEC is reassigned when the panel's format picker changes
             get imageCodec() { return IMAGE_CODEC; }, resolveImageCodec,
             // transport lanes: exposed for the lane/burst test harness
             allLanes, fetchSocketBudget, laneStats, laneSummary, recordLane, dedupeInflight,
             probeFetchProxy, probeDotLane, probeEdgeMirror, discoverProxyPorts,
-            dottedUrl, edgeUrlFor, proxyPorts, laneFetch, capabilitySummary, workerPoolSize,
+            dottedUrl, edgeUrlFor, proxyPorts, laneFetch, capabilitySummary, workerPoolSize, workerBatchSize, makePool,
             cdnFetch, cdnFetchWithFallback,
             get gmUsable() { return gmUsable; } }; } catch (e) {}
         try { window.__bwddUI = Object.assign(window.__bwddUI || {}, { renderStatsCards, renderBookCard, renderNativelyCard, renderMangaKotobaCard, setBar, showBars }); } catch (e) {}

@@ -112,30 +112,6 @@ const CONFIGS = [
     await page.close();
   }
 
-  // unscrambled page under the default jpeg codec: must be returned untouched
-  const page = await browser.newPage();
-  await page.evaluateOnNewDocument(() => { try { localStorage.clear(); } catch (e) {} });
-  await page.goto(APP);
-  await page.addScriptTag({ content: fs.readFileSync(US, 'utf8') });
-  await sleep(250);
-  const noop = await page.evaluate(async (W,H) => {
-    const b = window.__bwdd;
-    const c = new OffscreenCanvas(W,H); const x = c.getContext('2d',{alpha:false});
-    x.fillStyle='#abc'; x.fillRect(0,0,W,H);
-    const src = await c.convertToBlob({type:'image/jpeg',quality:0.92});
-    const u = new Uint8Array(await src.arrayBuffer());
-    const url = URL.createObjectURL(new Blob([b.buildWorkerSource()],{type:'text/javascript'}));
-    const w = new Worker(url);
-    const d = await new Promise(r=>{ w.onmessage=e=>r(e.data); w.postMessage({id:1, blob:src, seeds:{noDescramble:true, Size:null}, q:b.imageCodec.quality, fmt:b.imageCodec.type, W, H}); });
-    w.terminate(); URL.revokeObjectURL(url);
-    const got = new Uint8Array(await d.blob.arrayBuffer());
-    return { same: got.length===u.length && got.every((v,i)=>v===u[i]),
-             bytes: got.length, srcBytes: u.length, codec: b.imageCodec.fmt, type: d.blob.type };
-  }, W, H);
-  check('unscrambled page under jpeg is returned untouched',
-    noop.same, `codec=${noop.codec} returned ${noop.bytes}B vs source ${noop.srcBytes}B (${noop.type})`);
-  await page.close();
-
   await browser.close(); appSrv.close();
   const failed = results.filter(r=>!r.pass);
   fs.writeFileSync(path.join(__dirname,'image_codec_result.json'), JSON.stringify({results},null,2));

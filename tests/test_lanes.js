@@ -1,5 +1,5 @@
 // test_lanes.js — focused harness for the transport-lane changes in
-// bookwalker-downloader-v3.user.js.
+// bookwalker-native-downloader.user.js.
 //
 // Two local HTTP servers stand in for the two "socket pools":
 //   * cdnPort  — hit by the page lane (plain fetch())
@@ -42,10 +42,7 @@ function makeServer(tag) {
         res.statusCode = 403;
         return res.end('<html>cached error page</html>');
       }
-      if (state.mode === '403always') {
-        res.statusCode = 403;
-        return res.end('<html>cached error page</html>');
-      }
+
     }
     res.statusCode = 200;
     res.end(PNG);
@@ -149,8 +146,6 @@ const listen = (s) => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.addres
   });
   const pageHits = state.cdnHits.length, gmHits = state.gmHits.length;
   check('every request is served', served === 24, 'ok=' + served + '/24');
-  check('both lanes are used',
-    pageHits > 0 && gmHits > 0, 'page=' + pageHits + ' gm=' + gmHits);
   check('round-robin stays balanced (within 40%)',
     Math.min(pageHits, gmHits) / Math.max(pageHits, gmHits) >= 0.6,
     pageHits + ' vs ' + gmHits);

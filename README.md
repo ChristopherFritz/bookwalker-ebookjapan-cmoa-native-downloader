@@ -1,4 +1,4 @@
-# BookWalker Native Downloader · v1.5.0
+# BookWalker Native Downloader · v1.5.1
 
 [Changelog](CHANGELOG.md)
 
@@ -53,7 +53,7 @@ Most scripts for this site are *page-turners* that flip through the book and cap
 | Interrupted runs | Start over from page 1 | **Resume from the IndexedDB cache**, fetching only the missing pages |
 | Where it ends | A folder of captures you OCR yourself | ZIP **or** an integrated **mokuro OCR → upload → open-in-reader** pipeline |
 
-**The tile-shuffle, undone offline.** BookWalker doesn't serve plain images; each page is split into scrambled `32×32` blocks before it reaches the CDN, and the viewer reassembles them on a canvas (which is why capture scripts only ever see screen output). This script decrypts the page manifest, derives each page's scramble seeds, and **reverses the permutation in a Web Worker** with typed-array block copies + JPEG re-encode, so the ZIP contains the page as published, not as displayed.
+**The tile-shuffle, undone offline.** BookWalker doesn't serve plain images; each page is split into scrambled `32×32` blocks before it reaches the CDN, and the viewer reassembles them on a canvas (which is why capture scripts only ever see screen output). This script decrypts the page manifest, derives each page's scramble seeds, and **reverses the permutation in a Web Worker** with direct canvas tile blits + JPEG re-encode, so the ZIP contains the page as published, not as displayed.
 
 **Auth that keeps working mid-download.** Signed CloudFront URLs last only a few minutes, longer than a volume takes to download. While a run is in progress the script re-negotiates auth through the viewer's own endpoints (`/browserWebApi/pb`), tracks its request budget per policy, and paces itself, so there is no 403 wall at page 87 and no "flip a page every five minutes" ritual.
 
@@ -115,15 +115,15 @@ BookWalker viewer
 
 1. **Capture**. While a book is open, the script passively watches the viewer's own `fetch`/`XHR` traffic and records the signed CloudFront auth (`Policy`/`Signature`/`Key-Pair-Id`), the CDN base URL, and the encrypted `configuration_pack.json` manifest. Nothing is requested by the script itself at this stage.
 2. **Decrypt & plan**. `configuration_pack.json` is decrypted (custom base64 + RC4 key schedule) to recover each page's metadata: dimensions, block size, and per-page scramble seeds. The script knows the full page list before downloading anything.
-3. **Fetch**. Pages are prefetched from the CDN in parallel (a burst window scaled to the worker pool, ~3× pool size). Because signed CloudFront URLs last only a few minutes, auth is re-negotiated mid-run through the viewer's own `/browserWebApi/pb` endpoint, with a request-count budget per policy, 403/429 circuit breakers with cooldowns, and up to 4 retry rounds.
-4. **Descramble**. Each page is reassembled offline in a Web-Worker pool (up to ~2× your CPU cores): derive the per-page permutation from the seeds, copy the `32×32` blocks back into place, crop to the declared size, and JPEG-re-encode. What lands on disk is the page as published, not as displayed.
+3. **Fetch**. Pages are prefetched from the CDN in parallel through a bounded window (up to 12× the active decode-page count, with a small transport handoff margin). Because signed CloudFront URLs last only a few minutes, auth is re-negotiated mid-run through the viewer's own `/browserWebApi/pb` endpoint, with a request-count budget per policy, 403/429 circuit breakers with cooldowns, and up to 4 retry rounds.
+4. **Descramble**. Each page is reassembled offline in a Web-Worker pool (one worker per logical core, capped at 16; JPEG processes two pages per worker, while other formats use one): derive the per-page permutation from the seeds, copy the `32×32` blocks back into place, crop to the declared size, and JPEG-re-encode. What lands on disk is the page as published, not as displayed.
 5. **Deliver**. Either pack everything into a ZIP (`Series/Volume/page-0001.jpg`, …) or, for OCR, stream each finished page to mokuro-bridge as it's ready, starting with the cover so the destination shows life immediately.
 
 ### mokuro-bridge (local server, Python)
 
 A small [FastAPI](https://fastapi.tiangolo.com/) server (`127.0.0.1:62642`) with a session-based HTTP API.
 
-**Since v1.5.0 this script also uses the bridge as a socket multiplier.** Chrome's 6-connections-per-origin cap is keyed on scheme + host + **port**, so a local port is a fresh origin. The bridge opens a range of fetch-proxy ports (48 by default) and advertises them on `/health` as `fetchProxyPorts`; the script turns each one into a lane and routes page fetches through the least-loaded of them. The bridge raises its file-descriptor limit to hold that many listeners. Nothing is required from you: start the bridge and the extra sockets are there. The **?** next to the bridge row shows the live count. Its [CORS allow-list defaults to the four BookWalker web viewers](https://github.com/GolyBidoof/mokuro-bridge), which is what lets this userscript POST pages from the browser. Per volume it runs:
+**Since v1.5.0 this script also uses the bridge as a socket multiplier.** Chrome's 6-connections-per-origin cap is keyed on scheme + host + **port**, so a local port is a fresh origin. The bridge opens 48 fetch-proxy ports by default and advertises them on `/health`; the script turns them into lanes and routes page fetches through the least-loaded one. The bridge raises its file-descriptor limit to hold those listeners. Nothing is required from you: start the bridge and the extra sockets are there. The **?** next to the bridge row shows the live count. Its [CORS allow-list defaults to the four BookWalker web viewers](https://github.com/GolyBidoof/mokuro-bridge), which is what lets this userscript POST pages from the browser. Per volume it runs:
 
 1. **`POST /session/start`** creates a session for a volume title (edition suffixes like `（２）` / `1巻` are stripped so volumes group under one series folder).
 2. **`POST /session/{id}/page`** is one call per page image, streamed from the userscript as pages finish descrambling.
@@ -152,7 +152,7 @@ The hosted reader consumes the `.cbz` + `.mokuro` + `.webp` trio and shows each 
 2. **Block-move script (`A9p`)**. The permutation becomes a list of block moves: for each `32×32` tile (plus edge blocks for dimensions not divisible by 32), copy the scrambled source block back where it belongs, in reverse (`dest → src`).
 3. **Crop to declared size**. CDN frames can carry padding (e.g. a raw `1456×2048` frame for a `1450×2048` page); after unscrambling, the page is cropped to its declared `Size` so no scrambled edge strips remain.
 
-Everything runs in **Web Workers** (typed-array block copies + JPEG re-encode), which is what makes download + descramble fast and parallel.
+Everything runs in **Web Workers** (direct canvas tile blits + JPEG re-encode), which is what makes download + descramble fast and parallel.
 
 > The seed derivation, PRNG/permutation and block-move logic were validated byte-for-byte against live captures during development.
 

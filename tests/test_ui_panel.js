@@ -14,10 +14,9 @@ const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
 const UP = 63842, DEAD = 63899, NPORTS = 12;
 
-let CORS_OK = true;
 const ports = Array.from({ length: NPORTS }, (_, i) => UP + 1 + i);
 const bridge = http.createServer((req, res) => {
-  if (CORS_OK) res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.url.startsWith('/__bwdd_health')) {
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ bwddFetchProxy: true, portList: ports }));
@@ -44,6 +43,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const appPort = await listen(appSrv);
   const APP = 'https://127.0.0.1:' + appPort + '/?bwddDebug=1';
   const src = fs.readFileSync(US, 'utf8');
+  const fileVersion = (src.match(/@version\s+([0-9.]+)/) || [])[1];
   const results = [];
   const check = (n, pass, d) => { results.push({ n, pass, d }); console.log((pass?'PASS  ':'FAIL  ')+n+'  — '+d); };
 
@@ -93,9 +93,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       hasFmt: !!fmt, opts: fmt ? [...fmt.options].map(o=>o.value) : null, fmtVal: fmt ? fmt.value : null,
       qVisible: q ? getComputedStyle(q.closest('.bwdd-opt-row')).display !== 'none' : null,
       summary: window.__bwddUI && window.__bwddUI.capabilitySummary ? window.__bwddUI.capabilitySummary() : null,
+      expectedWorkers: Math.min(Math.max(4, navigator.hardwareConcurrency || 8), 16),
       codec: window.__bwdd.imageCodec,
-      // is the indicator actually on screen (not display:none / zero size)?
-      visible: root ? (root.getBoundingClientRect().width > 0 && getComputedStyle(root).display !== 'none') : false,
     };
   });
   check('the readout is hidden in the "?" popover, not the panel body',
@@ -122,7 +121,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('it reports the bridge ports it found', on.summary && on.summary.ports === NPORTS,
     `ports=${on.summary && on.summary.ports} sockets=${on.summary && on.summary.sockets} workers=${on.summary && on.summary.workers}`);
   check('it shows ports, sockets and workers on one short line',
-    /12 ports/.test(on.capsText||'') && /78 sockets/.test(on.capsText||'') && /28 workers/.test(on.capsText||''),
+    /12 ports/.test(on.capsText||'') && /78 sockets/.test(on.capsText||'') &&
+      (on.capsText || '').includes(on.expectedWorkers + ' workers'),
     JSON.stringify(on.capsText));
   check('the connection reasoning sits under the bridge row\u2019s single "?"',
     on.capsPopHidden === true && on.capsDotLabelled === true && /Connection speed/i.test(on.connSection||''),
@@ -138,9 +138,26 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('with the bridge up it promises the full budget',
     on.summary && on.summary.bridgeOnline === true && on.summary.effectiveSockets === 6*(1+NPORTS),
     `effective=${on.summary && on.summary.effectiveSockets}`);
-  check('workers matches the pool the run will spawn', on.summary && on.summary.workers === on.summary.workers,
-    `workers=${on.summary && on.summary.workers}`);
+  check('workers matches the batched pool the run will spawn',
+    on.summary && on.summary.workers === on.expectedWorkers,
+    `workers=${on.summary && on.summary.workers} expected=${on.expectedWorkers}`);
   check('bridge-on state is styled as active', on.capsClass && on.capsClass.includes('on'), on.capsClass);
+
+  const gh = await page.$('.bwdd-gh');
+  const ghBox = gh && await gh.boundingBox();
+  await page.evaluate(() => {
+    window.__ghClickCount = 0;
+    const link = document.querySelector('.bwdd-gh');
+    link.addEventListener('click', (e) => { window.__ghClickCount++; e.preventDefault(); });
+  });
+  if (ghBox) await page.mouse.click(ghBox.x + ghBox.width / 2, ghBox.y + ghBox.height / 2);
+  const ghState = await page.evaluate(() => {
+    const link = document.querySelector('.bwdd-gh');
+    return { clicks: window.__ghClickCount, href: link && link.href, target: link && link.target };
+  });
+  check('the header GitHub link is clickable and opens the repository target',
+    ghBox && ghState.clicks === 1 && ghState.href === 'https://github.com/GolyBidoof/bookwalker-native-downloader' && ghState.target === '_blank',
+    JSON.stringify(ghState));
 
   check('format picker exists with all four choices',
     on.hasFmt && JSON.stringify(on.opts) === JSON.stringify(['jpeg','webp','lossless','png']), JSON.stringify(on.opts));
@@ -158,13 +175,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       before, after: window.__bwdd.imageCodec,
       stored: localStorage.getItem('bwddImageFormat'),
       qHidden: getComputedStyle(q.closest('.bwdd-opt-row')).display === 'none',
-      note: document.querySelector('.bwdd-caps-note').textContent.slice(0, 40),
+      batch: window.__bwdd.workerBatchSize(window.__bwdd.imageCodec.type),
+      decodePages: window.__bwddUI.capabilitySummary().decodePages,
     };
   });
   check('choosing Lossless updates the live codec without a reload',
     lossless.after.fmt === 'lossless' && lossless.after.lossless === true, `${lossless.before} -> ${lossless.after.fmt}`);
   check('it persists the choice', lossless.stored === 'lossless', 'localStorage=' + lossless.stored);
   check('quality is hidden for lossless', lossless.qHidden === true, 'quality row hidden');
+  check('codec-specific worker batching is reflected in the capability summary',
+    lossless.batch === 1 && lossless.decodePages === on.expectedWorkers,
+    `batch=${lossless.batch} decodePages=${lossless.decodePages}`);
 
   const q85 = await page.evaluate(() => {
     document.querySelector('#bwdd-image-format').value = 'jpeg';
@@ -221,7 +242,6 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.close();
 
   // ---------------- bridge comes up later -----------------
-  CORS_OK = true;
   page = await loadPanel(DEAD);
   const before = await page.evaluate(() => window.__bwddUI.capabilitySummary().ports);
   // swap the bridge onto the port the page is watching: restart on DEAD
@@ -243,15 +263,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     cls: document.querySelector('.bwdd-bridge-anchor .bwdd-caps-line').closest('.bwdd-bridge-info-section').className,
   }));
   check('a bridge that dies stops being counted as available',
-    gone.s.bridgeOnline === false && gone.s.effectiveSockets === 6,
-    `online=${gone.s.bridgeOnline} effective=${gone.s.effectiveSockets} (discovered=${gone.s.ports})`);
+    gone.s.bridgeOnline === false && gone.s.ports === 0 && gone.s.effectiveSockets === 6,
+    `online=${gone.s.bridgeOnline} ports=${gone.s.ports} effective=${gone.s.effectiveSockets}`);
   const gonePop = await page.evaluate(() => {
     const secs = [...document.querySelectorAll('.bwdd-bridge-anchor .bwdd-bridge-pop .bwdd-bridge-info-section')]
       .map(x => x.textContent.replace(/\s+/g,' ').trim());
     return secs.find(t => /Connection speed/i.test(t)) || '';
   });
   check('and it explains the fallback rather than silently changing',
-    /not reachable now/i.test(gonePop) && gone.cls.includes('off'),
+    /not (?:reachable now|running)/i.test(gonePop) && gone.cls.includes('off'),
     gonePop.slice(0, 150) || gone.text.slice(0,120));
   await page.close();
 
@@ -259,7 +279,6 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // ---------------- version reporting ----------------
   // BWDD_VERSION was pinned at a literal and went stale for four releases, so the
   // panel claimed an old version no matter what was installed. Pin it down.
-  const fileVersion = (fs.readFileSync(US, 'utf8').match(/@version\s+([0-9.]+)/) || [])[1];
   {
     const vp = await browser.newPage();
     await vp.evaluateOnNewDocument(() => {

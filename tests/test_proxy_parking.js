@@ -15,6 +15,7 @@ const path = require('path');
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
 const N_PORTS = 6;
+const DEAD_BRIDGE_PORT = 63999;
 const BUF = Buffer.alloc(1024, 5);
 
 let mode = 'ok';                    // 'ok' | 'fail'
@@ -67,7 +68,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   page.on('request', r => { if (/bookwalker\.jp/.test(r.url())) return r.abort(); r.continue(); });
   page.on('console', m => { const t = m.text(); if (/retired after repeated parks/.test(t)) console.log('   [console] ' + t.slice(0,120)); });
   await page.goto(APP);
-  await page.addScriptTag({ content: fs.readFileSync(US, 'utf8') });
+  const src = fs.readFileSync(US, 'utf8').replace(
+    "'http://127.0.0.1:62642'", "'http://127.0.0.1:" + DEAD_BRIDGE_PORT + "'");
+  await page.addScriptTag({ content: src });
   await sleep(300);
   await page.evaluate((cdn) => {
     const s = window.__bwdd.state;
@@ -96,7 +99,6 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       lanesRemaining: b.allLanes().filter(l => l.name.startsWith('px:')).length,
       portsRemaining: b.proxyPorts.length,
       parked: Object.keys(los).filter(k => k.startsWith('px:') && los[k].parkUntil > Date.now()).length,
-      retired: Object.keys(los).filter(k => k.startsWith('px:') && los[k].parks > 0).length,
     };
   });
   check('a failing burst does NOT delete the proxy ports',

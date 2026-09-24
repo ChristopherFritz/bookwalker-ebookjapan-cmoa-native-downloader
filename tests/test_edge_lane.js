@@ -17,10 +17,10 @@ const BUF = Buffer.alloc(4096, 8);
 const N = 60;
 
 // ---- stand-in "CDN" (HTTP/1.1, capped at 6 by Chrome if hit directly) ----
-const cdn = { cur: 0, max: 0, hits: 0, direct: 0, viaEdge: 0 };
+const cdn = { cur: 0, max: 0, hits: 0, viaEdge: 0 };
 const cdnSrv = http.createServer((req, res) => {
   cdn.cur++; cdn.hits++; if (cdn.cur > cdn.max) cdn.max = cdn.cur;
-  if (req.headers['x-bwdd-edge']) cdn.viaEdge++; else cdn.direct++;
+  if (req.headers['x-bwdd-edge']) cdn.viaEdge++;
   setTimeout(() => {
     cdn.cur--;
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -122,14 +122,14 @@ const uscript = fs.readFileSync(US, 'utf8');
   check('with no mirror configured the lane stays off',
     noEdge.v === false && !noEdge.lanes.includes('edge'), JSON.stringify(noEdge));
 
-  cdn.cur = 0; cdn.max = 0; cdn.hits = 0; cdn.direct = 0; cdn.viaEdge = 0;
+  cdn.cur = 0; cdn.max = 0; cdn.hits = 0; cdn.viaEdge = 0;
   const baseOk = await fire(page, N);
   check('baseline is capped at 6 concurrent CDN fetches',
     cdn.max === 6, 'peak = ' + cdn.max + ' (ok=' + baseOk + '/' + N + ')');
   await page.close();
 
   // ---- with the edge mirror ------------------------------------------
-  cdn.cur = 0; cdn.max = 0; cdn.hits = 0; cdn.direct = 0; cdn.viaEdge = 0;
+  cdn.cur = 0; cdn.max = 0; cdn.hits = 0; cdn.viaEdge = 0;
   edge.conns = 0; edge.cur = 0; edge.max = 0;
   page = await freshPage(EDGE, null);
   const on = await page.evaluate(() => window.__bwdd.probeEdgeMirror().then(v => ({ v, lanes: window.__bwdd.allLanes().map(l => l.name), budget: window.__bwdd.fetchSocketBudget() })));

@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.5.1
+
+### Changed
+
+- Descrambling now batches two JPEG pages per worker (up to 16 workers), while
+  lossless WebP and PNG retain a one-page queue.
+- Prefetched page Blobs are handed to workers instead of being downloaded twice;
+  ZIP CRCs are calculated in a worker and single-flight cache pruning keeps the
+  page cache bounded.
+- The transport pipeline is bounded by active transport capacity plus a small
+  Blob-to-worker handoff margin. Discovered proxy ports are source-aware,
+  parked/recovered safely, and no longer count after their local transport
+  disappears.
+- The GitHub link in the panel is clickable again, and the bridge destination
+  default no longer reads the popover element by mistake.
+
+### Performance
+
+A real 1,099-page / 637.4 MB run completed in **24.8s** with the bridge's default
+48 ports. A 64-port run took 27.3s, so 48 remains the default; 64 remains an
+opt-in upper bound. The userscript release does not change the mokuro-bridge
+repository or its configuration.
+
+### Maintenance
+
+- The default test suite is hermetic; the live bridge end-to-end check is now
+  opt-in because it requires a separate bridge checkout and running service.
+- Removed duplicate assertions and dead test fixtures while retaining coverage
+  for lane fallback, parking, codec equivalence, ZIP/CRC, UI behavior and the
+  header link.
+
 ## v1.5.0
 
 Chrome allows 6 concurrent HTTP/1.1 connections per *origin*, and BookWalker's

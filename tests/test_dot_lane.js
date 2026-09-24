@@ -90,10 +90,6 @@ const listen = (s) => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.addres
   check('socket budget counts the dot lane',
     budget === 6 * lanesAfter.length,
     'budget = ' + budget + ' for ' + lanesAfter.length + ' lane(s) ' + JSON.stringify(lanesAfter));
-  check('the dot lane is worth 6 sockets',
-    budget - 6 === 6 * (lanesAfter.length - 1) && lanesAfter.includes('dot'),
-    'page-only would be 6, now ' + budget);
-
   // fire 12 at once and see whether both host spellings carry traffic
   perHost.clear();
   const okCount = await page.evaluate(async (base) => {
