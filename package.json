@@ -1,0 +1,14 @@
+{
+  "name": "bookwalker-native-downloader",
+  "version": "1.5.0",
+  "private": true,
+  "description": "Browser-driven tests for the BookWalker Native Downloader userscript.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/run.js",
+    "browser": "puppeteer browsers install chrome"
+  },
+  "devDependencies": {
+    "puppeteer": "^25.10.0"
+  }
+}
