@@ -25,7 +25,7 @@ npm run bump patch               # 1.9.0 -> 1.9.1, then rebuild everything
 
 The fragments are plain, ordered pieces of **one IIFE**: they share a single
 closure, so any fragment can call anything else in the file. There is no module
-loader, no bundler and no source map. That is deliberate — the shipped file stays
+loader, no bundler and no source map. That is deliberate: the shipped file stays
 readable and diffable against `src/` line for line, and `node build.mjs --check`
 can prove the artifact matches its sources exactly.
 
@@ -84,7 +84,7 @@ drifting apart:
 
 - the panel, its controls, the progress bars and the archive-name field
   (`core/51-panel.js`, `core/50-styles.js`)
-- the mokuro-bridge conversation — health, idle gate, session, ordered page
+- the mokuro-bridge conversation: health, idle gate, session, ordered page
   streaming, early cover upload, finalize, upload progress
   (`core/31-mokuro.js`, `core/60-mokuro-flow.js`, and `core/61-run-harness.js`)
 - the manga-kotoba and LearnNatively cards (`core/30-stats.js`)

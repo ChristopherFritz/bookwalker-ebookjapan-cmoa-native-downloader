@@ -1,7 +1,7 @@
-# 2.0.0 audit — architecture, quality, performance, reusability
+# 2.0.0 audit, architecture, quality, performance, reusability
 
 Snapshot 2026-09-25: everything below is the working tree on top of `3b18079`
-(Release v1.5.1) — 35 uncommitted paths, i.e. the whole fragment architecture,
+(Release v1.5.1), 35 uncommitted paths, i.e. the whole fragment architecture,
 the tests, the CI and the ebookjapan module. Another author is
 concurrently editing `src/sites/ebookjapan/`, so the ebookjapan figures here are a
 moving target.
@@ -25,8 +25,8 @@ Measured from `src/manifest.json` and the built artifacts, not estimated.
 | artifact | bytes | comments | embedded wasm/glue |
 | --- | --- | --- | --- |
 | combined | 773565 | 106727 (14%) | 213144 (28%) |
-| bookwalker-only | 409764 | 75479 (18%) | — |
-| cmoa-only | 337298 | 71520 (21%) | — |
+| bookwalker-only | 409764 | 75479 (18%) | n/a |
+| cmoa-only | 337298 | 71520 (21%) | n/a |
 | ebookjapan-only | 570880 | 74694 (13%) | 213144 (37%) |
 
 Three facts that shape every decision below:
@@ -37,7 +37,7 @@ Three facts that shape every decision below:
 2. **The heavy bytes are not the code you wrote.** 213 KB of the combined script
    (28%) is the ebookjapan wasm plus its glue, base64'd into a string literal in
    `src/sites/ebookjapan/01-glue.js` (a 218780 B file).
-3. **That wasm is decoded on demand, not at parse time** — `ebjLoadGlue()`
+3. **That wasm is decoded on demand, not at parse time**, `ebjLoadGlue()`
    (`01-glue.js:83`) guards on a cached core, `atob`s, checksums, compiles the
    glue with `new Function`, then instantiates the wasm. The two b64 literals are
    single string tokens, so the parser skips over them.
@@ -46,7 +46,7 @@ Three facts that shape every decision below:
    (`70-site.js:113` → `05-run.js:348-354` → `00-state.js:123`) gets there about
    500 ms after `document-end`. BookWalker and CMOA never touch it before a
    download. So the heaviest store pays a wasm decode shortly after boot, on
-   every page view — see P-1 below.
+   every page view, see P-1 below.
 
 Boot cost, measured in Chrome against the test fixture (median of 5, panel
 `#bwdd-root` present):
@@ -57,10 +57,10 @@ Boot cost, measured in Chrome against the test fixture (median of 5, panel
 | bookwalker-only | 84 ms |
 
 Parse cost in isolation is **not** measurable the obvious way: `new vm.Script`
-(and even `produceCachedData`) reports 0.1–0.3 ms for every artifact, because V8
+(and even `produceCachedData`) reports 0.1-0.3 ms for every artifact, because V8
 pre-parses function bodies lazily and the whole artifact is one IIFE body. Those
 numbers measure the pre-parse, not a real compile. The honest number is the
-end-to-end 84–113 ms above, and the 29 ms delta between the two is the extra
+end-to-end 84-113 ms above, and the 29 ms delta between the two is the extra
 cross-store work, not the extra bytes.
 
 ## 2. Architecture as found
@@ -86,9 +86,9 @@ availability catalog's data table (`32-availability.js:20-102`) and one is the
 documented BookWalker bridge default (`21-transport-pool.js:420-421`).
 
 **The CLI used to share this repo and shared no code with it.** The userscript
-is the browser, cross-store path. `cli/` was a Node path that was BookWalker-only
-— every one of its store host mentions was `bookwalker.jp`, `free-volume.js`
-alone had 51 — and it never `require`d anything from `src/`. It reimplemented
+is the browser, cross-store path. `cli/` was a Node path that was BookWalker-only:
+every one of its store host mentions was `bookwalker.jp`, `free-volume.js`
+alone had 51, and it never `require`d anything from `src/`. It reimplemented
 BookWalker loader/cr extraction (`free-volume.js:178-207`) that the userscript
 does not contain, because the userscript reads `c9P()` out of the live page and a
 headless Node process cannot; that duplication was justified.
@@ -115,25 +115,25 @@ matched" and "BookWalker" are indistinguishable at that point.
 
 The adapter contract makes a new store mostly additive. The touch list, in order:
 
-1. `src/sites/<store>/` — new fragments: at minimum a state/identity fragment
+1. `src/sites/<store>/`, new fragments: at minimum a state/identity fragment
    and a fragment calling `registerSite({...})` with the full contract.
-2. `src/manifest.json` — add every new fragment with a **new module label**, in
+2. `src/manifest.json`, add every new fragment with a **new module label**, in
    dependency order.
-3. `src/targets.json` — add the target (`name`, `out`, `matches`, `connects`,
+3. `src/targets.json`, add the target (`name`, `out`, `matches`, `connects`,
    `modules`) **and add the module to the `both` target's list**. This second half
    is the sharp edge: `build.mjs`'s `checkManifest` throws when a module has no
-   target at all, but forgetting `both` is silent — the new store would ship as a
+   target at all, but forgetting `both` is silent, the new store would ship as a
    standalone script and be absent from the combined one.
-4. `src/core/32-availability.js` — add a catalog entry (`siteId`, `label`,
+4. `src/core/32-availability.js`, add a catalog entry (`siteId`, `label`,
    `color`, `origin`, `hosts`, `search`, and either per-volume parsing or a
    `freeBadge` regex).
-5. `tests/test_split_builds.js` — the `EXPECT` array hardcodes the three host
+5. `tests/test_split_builds.js`, the `EXPECT` array hardcodes the three host
    names. Without a new entry the new artifact is still built and still checked
    for metadata, but never booted, so the "does it actually run" coverage silently
    does not exist for it.
-6. `tests/test_availability.js` — the fixture host map (`:101-103`) needs a search
+6. `tests/test_availability.js`, the fixture host map (`:101-103`) needs a search
    page for the new store if it carries the cross-store card.
-7. `README.md` and `src/README.md` — the artifact table and module table.
+7. `README.md` and `src/README.md`, the artifact table and module table.
 
 No certificate work is needed: the fixtures map every host to 127.0.0.1 and
 Chrome runs with `--ignore-certificate-errors`.
@@ -153,15 +153,15 @@ single real hazard is step 3's silent half.
 ## 4. Comments: the data, and what I recommend
 
 You asked me to remove comments. I measured before touching anything, and I do not
-think that is the right move — but it is your call, so here is the whole picture.
+think that is the right move, but it is your call, so here is the whole picture.
 
-**The saving is 14–21% of each artifact**: 106727 B in the combined, 75479 B in
+**The saving is 14-21% of each artifact**: 106727 B in the combined, 75479 B in
 bookwalker-only, 71520 B in cmoa-only, 74694 B in ebookjapan-only.
 
 **What it would cost:**
 
 - **It buys almost no speed.** Comments are skipped by the parser as trivia. Boot
-  is 84–113 ms and is dominated by real work (site detection, network capture
+  is 84-113 ms and is dominated by real work (site detection, network capture
   install, the first poll). The 29 ms gap between the combined and single-store
   builds is the cross-store feature running, not bytes being parsed.
 - **It breaks two test invariants that are load-bearing.** `test_artifacts.js`
@@ -195,7 +195,7 @@ parse. See the performance section.
 
 If you still want action on comments, the version I would do is a **curation
 pass, not a strip**: delete comments that restate the code, keep every comment
-that says why, and never touch the artifact — source only. That is a review over
+that says why, and never touch the artifact, source only. That is a review over
 50 files with a concurrent author in the tree, so it wants its own branch and its
 own diff to read, and it will save single-digit percent, not 20.
 
@@ -203,9 +203,9 @@ own diff to read, and it will save single-digit percent, not 20.
 
 Verified good:
 
-- **The wasm is lazy** (§1) — the single largest potential startup cost is not
+- **The wasm is lazy** (§1), the single largest potential startup cost is not
   paid at startup.
-- **Boot is 84–113 ms**, which is not a problem for a panel that waits on the
+- **Boot is 84-113 ms**, which is not a problem for a panel that waits on the
   viewer's own page state anyway.
 - **Cross-store lookups are cached** (`availabilityMemory`, keyed on
   `seed|volNum`) and re-run only when the detected book or volume changes
@@ -217,7 +217,7 @@ Verified good:
   `61-run-harness.js`, `sites/bookwalker/21-trial-zip.js`, `sites/bookwalker/22-run.js`,
   `sites/cmoa/02-run.js`, `sites/ebookjapan/05-run.js`). The panel's single
   `MutationObserver` (`51-panel.js:1037`) disconnects itself inside its own
-  callback — it is a one-shot "wait until the stats column has content" latch, not
+  callback, it is a one-shot "wait until the stats column has content" latch, not
   a permanent watcher. The remaining risk is not whether a clear exists but
   whether every early-return path reaches it, which only a per-path read settles.
 - **Cross-store network is bounded and time-limited.** Every availability query
@@ -239,19 +239,19 @@ Ordered, with the ones that need a decision marked.
    GreasyFork entry whose "Applies to" lists three hosts, that reads as a bug.
    **Needs your wording.**
 2. **Decide the comment question** (§4). **Needs your call.**
-3. `npm run bump major` — updates `src/core/00-identity.js`, the README title and
+3. `npm run bump major`, updates `src/core/00-identity.js`, the README title and
    `package.json` in one step, then rebuilds all four artifacts.
 4. **CHANGELOG:** the file has a `## v1.9.0` section for a version that never
    shipped. Rename it to `## v2.0.0` rather than listing a version nobody can
    install, and fold in the 2.0.0 highlights.
 5. Fix the stale two-store wording: `src/entry/90-boot.js:4`,
    `src/core/61-run-harness.js:166`, `src/README.md:9,39,171`.
-6. `src/core/32-availability.js` — set ebookjapan's `siteId: 'ebookjapan'` now
+6. `src/core/32-availability.js`, set ebookjapan's `siteId: 'ebookjapan'` now
    that it registers a site.
 7. `npm test` (the userscript suite: 14 files) and `npm run check:build`.
-8. Commit and push `main`. **This publishes nothing** — `ci.yml` only builds and
+8. Commit and push `main`. **This publishes nothing**, `ci.yml` only builds and
    tests.
-9. `git tag v2.0.0 && git push origin main --tags` — `release.yml` verifies the
+9. `git tag v2.0.0 && git push origin main --tags`, `release.yml` verifies the
    tag against the core version, runs the same gate, publishes the GitHub Release
    with all four artifacts, then refreshes the `release` branch.
 10. Create the three new GreasyFork entries and point all four at
@@ -277,14 +277,14 @@ Moved: `cli/` (22 files), `bin/`, `extension/` (loaded by
 
 Changed to make the split work:
 
-- `cli/constants.js` — the default userscript path now points at the sibling repo
+- `cli/constants.js`, the default userscript path now points at the sibling repo
   (`SIBLING_REPO_SCRIPT`), still overridable with `BWDD_US`. `cli/runner.js` and
   `cli/public-capture.js` had two more copies of that path and now use the one
   constant, so there is a single place to fix if either project moves.
-- `package.json` — `test` is just `node tests/run.js`; `test:cli`, `headless`,
+- `package.json`, `test` is just `node tests/run.js`; `test:cli`, `headless`,
   `run` and the `bin` block are gone; `sharp` moved to `devDependencies` because
   only the browser tests use it now (the userscript cannot).
-- `README.md`, `RELEASING.md`, `.gitignore` — references and now-dead CLI entries
+- `README.md`, `RELEASING.md`, `.gitignore`, references and now-dead CLI entries
   removed. `output/` stays in `.gitignore`: `src/` and `tests/` both use it.
 - The stray empty `save` file was deleted.
 
@@ -320,14 +320,14 @@ do not move.
 
 **Top architecture problems**, worst first:
 
-- **P-1 `BookWalker does not use the shared run harness`** — `createRunHarness`
+- **P-1 `BookWalker does not use the shared run harness`**, `createRunHarness`
   is called only from `cmoa/02-run.js:67` and `ebookjapan/05-run.js:122`.
   `bookwalker/22-run.js` (792 lines) and `21-trial-zip.js` re-implement it, with
   three near-identical copies of the mokuro open+poll, finalize+report and
   ZIP-download blocks. `61-run-harness.js:4-6` and `src/README.md:102-121` both
-  claim otherwise. **L** — but this is the single biggest maintainability item in
+  claim otherwise. **L**, but this is the single biggest maintainability item in
   the repo.
-- **P-2 `Only BookWalker locked the panel during a run`** — *fixed in this pass.*
+- **P-2 `Only BookWalker locked the panel during a run`**, *fixed in this pass.*
   `ui.setRunLock(true)` appeared once in all of `src/`, at `bookwalker/22-run.js:16`;
   the harness only ever released it. CMOA and ebookjapan could therefore start a
   second concurrent run over the same book. The harness now acquires the lock in
@@ -335,30 +335,30 @@ do not move.
   `finally` (`cmoa/02-run.js:205`, `ebookjapan/05-run.js:540`), so the lock cannot
   outlive a failed run. Both the acquire and the release are `typeof`-guarded, so
   a reduced `ui` degrades to no lock rather than throwing at teardown.
-- **P-3 `Three undeclared interfaces`** — the adapter object, the `ui` bag and the
+- **P-3 `Three undeclared interfaces`**, the adapter object, the `ui` bag and the
   options bag have no validation, and the `ui` surface is hand-mirrored for
   headless at `11-automation.js:77-93` against the real one at `51-panel.js:1271`.
   A new store can call a `ui` member that is not stubbed and silently no-op when
   driven headlessly. **M**
-- **P-4 `Store-specific assumptions in shared code`** — the availability catalog,
+- **P-4 `Store-specific assumptions in shared code`**, the availability catalog,
   the three-store tooltip (`34-unified-link.js:49-50`), the `'BookWalker Volume'`
   fallback (`30-stats.js:494`), the automation run banner (`11-automation.js:143`),
   the proxy allowlist default (`21-transport-pool.js:420-421`) and one global
   `@grant`. **M**
-- **P-5 `A typo in a target's module list failed silently`** — *fixed in this
+- **P-5 `A typo in a target's module list failed silently`**, *fixed in this
   pass*: `build.mjs` now errors on a module a target names that no fragment
   declares, with a test that builds a deliberately broken copy and asserts the
   failure (`tests/test_artifacts.js`).
-- **P-6 `Manifest order is load-bearing and was unchecked`** — `SITE_REGISTRY` is
+- **P-6 `Manifest order is load-bearing and was unchecked`**, `SITE_REGISTRY` is
   a `const` (`70-site.js:26`) and `detectSite` is first-match-wins (`:34-39`), so
   a store fragment above `70-site.js` is a TDZ `ReferenceError` and one above
   another store silently wins shared hosts. *Fixed*: `build.mjs` now rejects a
   fragment that calls `registerSite()` before the fragment that defines it, also
   covered by the new test.
-- **P-7 `Tests hardcode the store count`** — `test_split_builds.js:123-124`
+- **P-7 `Tests hardcode the store count`**, `test_split_builds.js:123-124`
   infers the expected adapter with a binary if/else ending in `'ebookjapan'`;
   `test_availability.js:211` asserts exactly two pills. **M**
-- **P-8 `Documentation has drifted`** — `src/README.md:9-11` omits
+- **P-8 `Documentation has drifted`**, `src/README.md:9-11` omits
   `ebookjapan-only.user.js`, `:36-43` omits `sites/ebookjapan`, the core table
   omits `34-unified-link.js`, `:118-121` repeats the false harness claim, `:22`
   still uses a 1.6.5 example, and `src/manifest.json:7` says "both stores". Since
@@ -396,7 +396,7 @@ at `90-boot.js:40`; the adapter `state` field, which nothing reads (tests read
 exported API (`61-run-harness.js:417-428`). **Per-target dead code is the
 interesting kind**: `core/22-transport-health.js` and all of
 `core/23-transport-burst.js` are dead in the CMOA and ebookjapan builds, because
-their only callers are BookWalker fragments — so those artifacts ship breaker and
+their only callers are BookWalker fragments, so those artifacts ship breaker and
 burst logic they cannot reach.
 
 **Duplication.** Beyond P-1: the retry-failed-pages loop exists twice
@@ -415,11 +415,11 @@ timeouts `45000`/`4000`/`60000` are unnamed literals repeated 7/4/4 times.
    non-trial run before a single page is fetched, and the panel shows only
    `Error: Cannot read properties of undefined…`. The trial path guards the
    identical shape (`21-trial-zip.js:113-116`).
-2. **`bookwalker/22-run.js:544`** — `failedIdx.add(jobSeq + 1)` runs before the
+2. **`bookwalker/22-run.js:544`**, `failedIdx.add(jobSeq + 1)` runs before the
    only `jobSeq++` (`:548`), so a missing manifest section marks the *next* page
    as failed and drops the section from `realTotal` (`:569`). "Saved N of M" and
    the retry rounds are then quietly wrong.
-3. **`bookwalker/20-auth-lifecycle.js:260`** —
+3. **`bookwalker/20-auth-lifecycle.js:260`** ,
    `if (!state.auth || !state.baseUrl && !cFirst)` binds as
    `!state.auth || (!state.baseUrl && !cFirst)`. With `cFirst` true, auth present
    and `baseUrl` absent, the `/c` fallback is skipped and the run dies with
@@ -433,7 +433,7 @@ run with a `TypeError` before a single page is fetched.
 
 For bug 2 the fix is not a re-index but a deletion: `jobSeq + 1` is the index of
 the *next* page, which has not been counted yet, so the old line marked an
-innocent page as failed — self-healing only if that page happened to succeed —
+innocent page as failed, self-healing only if that page happened to succeed ,
 and when the missing section was last it left an index beyond `realTotal` that no
 job could ever clear, so `failedIdx` never emptied. That phantom then made
 `finishedOk` false and blocked the post-run cache clear. A missing section is now
@@ -445,7 +445,7 @@ finished-ok.
 **Bug 3 is fixed, and git history is what settled it.** An earlier draft of this
 section recommended leaving it alone, because the second `/c` call might be
 load-bearing for a public/free reader. `git log -S` disproves that premise:
-`cFirst` and `publicBootstrap` appear in **no commit in the repository** — they
+`cFirst` and `publicBootstrap` appear in **no commit in the repository**, they
 were introduced in the current uncommitted work, so there is no shipped behaviour
 depending on them. In v1.5.1 (`bookwalker-native-downloader.user.js:5911-5931`) the
 sequence was nested and strictly sequential:
@@ -468,14 +468,14 @@ still missing**. The parenthesised condition restores exactly that invariant:
 `(!state.auth || !state.baseUrl) && !cFirst`. The `cFirst` branch's `/c` is no
 longer repeated, and the non-`cFirst` path is v1.5.1's `/pb` → `/c` verbatim.
 `refreshAuthBest()` (`20-auth-lifecycle.js:85-97`) already carried the other half
-of the v1.5.1 semantics forward unchanged — `/c` after `/pb`, skipped when `/pb`
+of the v1.5.1 semantics forward unchanged, `/c` after `/pb`, skipped when `/pb`
 moved the policy signature.
 
 One deliberate difference remains, and it is not a regression: v1.5.1 had no
 public/free route, so it always tried `/pb` first. The `cFirst` branch suppresses
 `/pb` on that route because a synthetic bookmark advances a public reader's
 position. Matching v1.5.1 *literally* would mean deleting the `cFirst` branch and
-re-accepting that; matching its *invariant* — one `/c`, as a fallback — is what
+re-accepting that; matching its *invariant*, one `/c`, as a fallback, is what
 the code now does.
 
 Also fixed in this pass: `gmFetch`'s plain-fetch path (`30-stats.js:31`) had no
@@ -500,8 +500,8 @@ first fire. All object URLs have matching revokes.
 
 1. **ebookjapan resolved twice concurrently. Folded into the harness fix above
    as the second release blocker:** *fixed in this pass.* `ebjResolvePages`
-   (`ebookjapan/00-state.js:86-210`) has no in-flight guard — unlike CMOA's
-   `collecting` flag (`cmoa/00-state.js:387`) — and is triggered by both the boot
+   (`ebookjapan/00-state.js:86-210`) has no in-flight guard, unlike CMOA's
+   `collecting` flag (`cmoa/00-state.js:387`), and is triggered by both the boot
    poll (`70-site.js:113`) and the run timer (`ebookjapan/05-run.js:357`). Both
    read `ebjCore === null` (`01-glue.js:84`) before either sets it (`:123`), so
    the user paid two wasm decodes/instantiations and two `open_book` sessions,
@@ -514,7 +514,7 @@ first fire. All object URLs have matching revokes.
    stats are consumed only by the page-1 gate (`ebookjapan/04-worker.js:91` vs
    `05-run.js:160-167`). One GPU→CPU sync and a transient allocation per wasted
    page. **S**
-3. **CMOA descrambles and encodes on the main thread** — `src/sites/cmoa` uses no
+3. **CMOA descrambles and encodes on the main thread**, `src/sites/cmoa` uses no
    workers at all; `cmoa/02-run.js:161-173` runs ~20-26 jobs through
    `cmoa/01-fetch.js:205-255`. Jank plus live canvas backing. **L**
 4. **The boot poll calls `site.refresh()` every 500 ms** regardless of whether
@@ -526,7 +526,7 @@ first fire. All object URLs have matching revokes.
    dedupe** (`32-availability.js:244-266,410-427`). *Partly fixed in this pass*:
    one shared fan-out per key, and the cache is now capped at 50 entries.
    Sequential candidate walks remain. **S**
-7. **Untimed fetch paths** — ebookjapan's resolve (`00-state.js:68,91,116`) still
+7. **Untimed fetch paths**, ebookjapan's resolve (`00-state.js:68,91,116`) still
    has none. *Fixed* for `gmFetch`. **S**
 8. **The bridge `/health` endpoint is fetched twice per tick**
    (`51-panel.js:261` and `:271`) plus a boot-time IndexedDB prune
@@ -538,21 +538,21 @@ dies without posting, since `pool.terminate()` does not clear it; BookWalker's
 `ocrBuffer` (`22-run.js:221`) and `zip.entries` hold page blobs for the run's
 duration.
 
-## 9. Recommended order before 2.0.0 — status
+## 9. Recommended order before 2.0.0, status
 
-1. **The two decisions that blocked everything else** — done. The combined script
+1. **The two decisions that blocked everything else**, done. The combined script
    is `Omnimanga Native Downloader` (§10), and the comments were trimmed 17%
    rather than removed.
-2. **The three BookWalker bugs in §8.2** — all three fixed. Git history settled
+2. **The three BookWalker bugs in §8.2**, all three fixed. Git history settled
    the third (§8.2).
-3. **P-2 and perf 1** — the two release blockers, both fixed in this pass and
+3. **P-2 and perf 1**, the two release blockers, both fixed in this pass and
    covered by `tests/test_run_safety.js` (15 checks): the run lock is now held by
    the shared harness, and ebookjapan resolves a volume once at a time. Perf 2/4
    (per-page `getImageData`, the unconditional 500 ms `refresh()`) remain open but
    are not release gates.
-4. **P-1 (BookWalker onto the shared harness)** — still the big one, still **L**,
+4. **P-1 (BookWalker onto the shared harness)**, still the big one, still **L**,
    still deliberately not attempted in the same window as a version bump.
-5. **P-8 doc drift** — done (§10).
+5. **P-8 doc drift**, done (§10).
 6. **Still open for the tag:** commit the tree (HEAD is `3b18079 Release v1.5.1`,
    with the whole architecture untracked), rename `## v1.9.0` → `## v2.0.0` in the
    changelog, decide the artifact filename, and wait for the concurrent ebookjapan
@@ -582,19 +582,19 @@ than silently change - it has to be repointed at `bookwalker-only.user.js`.
 the core table list `sites/ebookjapan` and `34-unified-link.js`, the "why one
 file" section says three stores, the `npm run bump` example moved off 1.6.5, and
 the run-harness section now states plainly that **only CMOA and ebookjapan create
-a harness today** and that BookWalker's paths hand-roll the same stages — it
+a harness today** and that BookWalker's paths hand-roll the same stages, it
 previously implied BookWalker used it, which is the same false claim as
 `61-run-harness.js:4-6`.
 
 **Comments: trimmed, not removed** (the decision above). The pass covers the 49
-files outside `src/sites/ebookjapan/` — the rule is keep every *why*, delete
+files outside `src/sites/ebookjapan/`, the rule is keep every *why*, delete
 restatement, orphaned blocks and stale claims. Because the fragments are
 concatenated verbatim, "no code changed" is verifiable rather than asserted: a
 baseline snapshot of `src/` was taken first, and each fragment is compared
 before/after with comments stripped, on top of the full suite.
 
 **The tree is moving underneath this audit.** `src/sites/ebookjapan/05-run.js`
-grew 400 → 604 lines (+10,180 B) at 02:39 during this session — the concurrent
+grew 400 → 604 lines (+10,180 B) at 02:39 during this session, the concurrent
 author, not this pass. The combined artifact went 774,861 B (measured in §1) to
 786,445 B for that reason, not because of the rename (which is worth ~200 B). All
 byte figures in §1 are a snapshot of that moment; the architecture holds, the

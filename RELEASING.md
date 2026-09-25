@@ -3,7 +3,7 @@
 ## The short version
 
 ```bash
-npm run bump minor     # patch | minor | major | x.y.z — bumps the core version,
+npm run bump minor     # patch | minor | major | x.y.z; bumps the core version,
                        # README title and package.json, then rebuilds every artifact
 # add the "## vX.Y.Z" section to CHANGELOG.md
 npm test               # the whole userscript suite (14 files, browser fixtures)
@@ -13,7 +13,7 @@ git push origin main --tags
 ```
 
 **Pushing to `main` publishes nothing.** `ci.yml` builds every artifact, proves
-the committed files match `src/` and compile, and runs the full suite — and that
+the committed files match `src/` and compile, and runs the full suite, and that
 is all it does. Work in progress can sit on `main` for as long as you like.
 
 **Tagging publishes.** `release.yml` runs on a `v*` tag: it checks the tag
@@ -38,7 +38,7 @@ One rule follows: *`main` is what you are working on, `release` is what the worl
 has.* Push to `main` freely; the GreasyFork entries do not move until you tag.
 
 Until the first release the `release` branch does not exist, so the sync URL
-404s and GreasyFork has nothing to pull. That is the safe default — there is
+404s and GreasyFork has nothing to pull. That is the safe default: there is
 nothing to configure early and nothing that can leak.
 
 The repository is `GolyBidoof/bookwalker-ebookjapan-cmoa-native-downloader`
@@ -56,7 +56,7 @@ Each artifact declares:
 
 Install once and the userscript manager checks that URL for a new `@version`.
 `releases/latest/download/…` is stable across releases and always resolves to the
-newest published one — a release asset rather than a raw branch URL, for the same
+newest published one, a release asset rather than a raw branch URL, for the same
 reason GreasyFork reads `release`: un-published work must not become somebody's
 update.
 
@@ -68,7 +68,7 @@ who already installed it.
 
 ### Setting up source sync
 
-GreasyFork has **no upload API** — automating an upload means logging in with
+GreasyFork has **no upload API**: automating an upload means logging in with
 account credentials plus a TOTP secret and driving the web forms, which breaks
 whenever the site changes and puts credentials into CI secrets. Nothing here does
 that. GreasyFork's own sync is the supported route, and it is one setting per
@@ -87,7 +87,7 @@ The existing entry is
 currently v1.5.1. It keeps serving 1.5.1 until a release puts a newer version on
 the `release` branch.
 
-### Which URL goes in which entry — read this before pasting
+### Which URL goes in which entry (read this before pasting)
 
 At v1.5.1 there was one artifact, `bookwalker-native-downloader.user.js`, and
 entry 594508 served it. In v2.0.0 that content is the **BookWalker-only** script
@@ -125,7 +125,7 @@ entry: v1.5.1 carries a pasted `CHANGELOG.md` section (heading and all) and
 v1.1.0 a hand-written line. Two ways to keep it:
 
 - **Paste it.** `npm run notes -- v2.0.0` prints the section with the `## vX.Y.Z`
-  heading stripped, which is what the field wants — GreasyFork already shows the
+  heading stripped, which is what the field wants: GreasyFork already shows the
   version above it, so the heading in the v1.5.1 paste is redundant. One paste per
   entry per release.
 - **Do not duplicate it.** Put a link to the

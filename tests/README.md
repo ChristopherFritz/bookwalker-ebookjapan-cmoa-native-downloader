@@ -1,6 +1,6 @@
 # Tests
 
-Browser-driven checks for the userscript (built from `src/` — run
+Browser-driven checks for the userscript (built from `src/`; run
 `npm run build` first, or `npm run check:build` to see whether it is stale). The default
 suite loads the userscript into headless Chrome against local stub servers; the
 live bridge check is opt-in.
