@@ -7,20 +7,25 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const fragment = file => fs.readFileSync(path.join(root, 'src', file), 'utf8');
+let storageReads = 0;
+class Storage { setItem() {} }
+const originalSetItem = Storage.prototype.setItem;
 const context = vm.createContext({
-  URLSearchParams, TextEncoder, Blob, setTimeout,
+  URLSearchParams, TextEncoder, Blob, FormData, setTimeout,
+  window: { Storage },
+  localStorage: { getItem() { storageReads++; return JSON.stringify({ page: 0, url: "changed.xhtml" }); } },
   location: { search: '?cid=book-1' },
-  isHeadlessPage: () => true,
+  isHeadlessPage: () => false,
   IMAGE_CODEC: { ext: 'jpg' },
 });
 vm.runInContext(
   fragment('sites/bookwalker/00-state.js') +
   fragment('core/40-naming.js') +
   fragment('core/41-zip.js') +
-  '\nglobalThis.api = { bookWalkerPageName, rememberResumeData, buildStoreZip };',
+  '\nglobalThis.api = { bookWalkerPageName, buildStoreZip, zipEntryNumber };',
   context
 );
-const { bookWalkerPageName, rememberResumeData, buildStoreZip } = context.api;
+const { bookWalkerPageName, buildStoreZip, zipEntryNumber } = context.api;
 const results = [];
 function check(name, pass, detail) {
   results.push(pass);
@@ -36,11 +41,19 @@ function check(name, pass, detail) {
   check('double-digit pages remain in filename order',
     names.slice().sort().join('|') === names.join('|'), names.slice().sort().join(', '));
 
-  rememberResumeData('/NFBR.a6iMark/NFBR.ResumeData/book-1/1',
-    JSON.stringify({ page: 9, url: 'OEBPS/text/special.xhtml' }));
-  check('a captured resume name overrides the manifest stem for its page',
-    bookWalkerPageName(10, 'OEBPS/text/p-0010.xhtml') === '0010 special.jpg',
-    bookWalkerPageName(10, 'OEBPS/text/p-0010.xhtml'));
+  check('nested paths sort by their basename ordinal',
+    zipEntryNumber('2026 Series/Volume/0010 表紙.jpg') === 10 &&
+    zipEntryNumber('Series/Volume/page-0002.jpg') === 2,
+    'numbered parent directories do not affect page order');
+  for (const stem of ['界'.repeat(190), '😀'.repeat(190)]) {
+    const name = bookWalkerPageName(12345, stem + '.xhtml');
+    check('Unicode filenames fit the 255-byte component limit',
+      new TextEncoder().encode(name).length <= 255 && !name.includes('\uFFFD') && name.endsWith('.jpg'), name);
+  }
+  check('missing source still has a padded ordinal', bookWalkerPageName(1, '') === '0001.jpg', '0001.jpg');
+
+  check('naming does not read bookmarks or patch storage',
+    storageReads === 0 && Storage.prototype.setItem === originalSetItem, 'no storage side effects');
 
   const blob = new Blob(['page'], { type: 'image/jpeg' });
   const zip = await buildStoreZip(names.slice().reverse().map(name => ({ path: name, blob })));
@@ -57,6 +70,43 @@ function check(name, pass, detail) {
   }
   check('ZIP entries are in page order even when submitted in reverse',
     zipNames.join('|') === names.join('|'), zipNames.join(', '));
+
+  const streamed = [];
+  let trialZip;
+  const noop = () => {};
+  vm.runInContext(fragment('core/31-mokuro.js') + fragment('sites/bookwalker/21-trial-zip.js') +
+    '\nglobalThis.downloadTrialZip = downloadTrialZip;', context);
+  Object.assign(context, {
+    performance: { now: () => 0 },
+    cdnFetch: async () => ({ ok: true, blob: async () => blob }),
+    authQuery: () => '', makeUploadBarUpdater: () => noop,
+    setBar: noop, reportRunProgress: noop,
+    ensureBridgeRunning: async () => true, waitForBridgeIdle: async () => true,
+    mokuroStartSession: async () => ({ session_id: 'test', safe_title: 'test' }),
+    safeLogText: String,
+    bridgeSessionPath: (id, route) => id + route,
+    mokuroBridgePost: async (route, timeout, fd) => {
+      streamed.push([fd.get('filename'), Number(fd.get('page_num')), fd.get('page').name]);
+      return { ok: true, json: async () => ({}) };
+    },
+    URL: { createObjectURL: value => { trialZip = value; return 'blob:test'; }, revokeObjectURL: noop },
+    document: { body: { appendChild: noop }, createElement: () => ({ click: noop, remove: noop }) },
+    setTimeout: noop,
+  });
+  const bar = () => ({ wrap: { style: {} }, fill: { style: {} }, labRate: {} });
+  const ui = { barDownload: bar(), barDescramble: bar(), barMokuro: bar(), barUpload: bar() };
+  const fid = 'OEBPS/text/表紙 page.xhtml';
+  const config = { [fid]: { FileLinkInfo: { PageCount: 2 } } };
+  const expected = ['0001 表紙 page.jpg', '0002 表紙 page.jpg'];
+  const trialOk = await context.downloadTrialZip(ui, config, [{ file: fid }], 'test', {}, 'zip', {}, 'test');
+  const trialBytes = Buffer.from(await trialZip.arrayBuffer());
+  check('trial ZIP preserves manifest names for multiple images per source',
+    trialOk && expected.every(name => trialBytes.includes(Buffer.from(name))), expected.join(', '));
+  const ocrOk = await context.downloadTrialZip(ui, config, [{ file: fid }], 'test', {}, 'ocr', {}, 'test',
+    { skipCover: true, pollBridgeStatus: false, deferFinalize: true });
+  check('trial OCR sends Unicode filenames and explicit page ordinals',
+    ocrOk && JSON.stringify(streamed) === JSON.stringify(expected.map((name, i) => [name, i + 1, name])),
+    JSON.stringify(streamed));
 
   const failed = results.filter(pass => !pass).length;
   console.log(failed ? '\n' + failed + ' FAILED' : '\nALL ' + results.length + ' CHECKS PASSED');

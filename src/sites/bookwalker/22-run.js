@@ -45,8 +45,6 @@
             reportRunProgress(runOptions, 'state-refresh-start');
             await ensureStateFresh();
             reportRunProgress(runOptions, 'state-refresh-ready');
-            // Read the latest saved position before assigning output filenames.
-            if (!runOptions.headless) readCurrentResumeData();
             const config = state.decodedConfig || decodeConfig(state.configBody);
             const contents = config['configuration'] && config['configuration']['contents'];
             if (!contents || !contents.length) throw new Error('Configuration manifest contains no readable pages.');

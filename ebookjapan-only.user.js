@@ -2606,7 +2606,7 @@
     }
     const enc = new TextEncoder();
     function zipEntryNumber(path) {
-        const name = String(path || '');
+        const name = String(path || '').split('/').pop();
         const m = name.match(/^(\d+)(?=[ .])/) || name.match(/page-(\d+)\./i);
         return m ? Number(m[1]) : Infinity;
     }

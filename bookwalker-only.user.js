@@ -86,67 +86,28 @@
         baseUrl: null,     // e.g. https://bw-bv-epubs.bookwalker.jp/3_product/<cid>/1/<pid>/
         cti: null,         // title
         configBody: null,  // encrypted configuration_pack.json text
-        configFromUrl: null,
-        resumePageNames: Object.create(null)
+        configFromUrl: null
     };
-    const RESUME_KEY_PREFIX = '/NFBR.a6iMark/NFBR.ResumeData/';
-
-    function resumeStem(url) {
-        const path = String(url || '').split(/[?#]/, 1)[0];
-        const base = path.slice(path.lastIndexOf('/') + 1);
-        const stem = base.replace(/\.(?:x?html?)$/i, '');
-        return fsSafePath(stem);
-    }
-
-    function rememberResumeData(key, value) {
-        const match = String(key || '').match(/^\/NFBR\.a6iMark\/NFBR\.ResumeData\/([^/]+)\/1$/);
-        if (!match) return;
-        try {
-            const data = JSON.parse(String(value || ''));
-            const page = Number(data && data.page);
-            const name = resumeStem(data && data.url);
-            if (!Number.isInteger(page) || page < 0 || !name) return;
-            const cid = match[1];
-            if (!state.resumePageNames[cid]) state.resumePageNames[cid] = Object.create(null);
-            state.resumePageNames[cid][page] = name;
-        } catch (e) {}
-    }
-
-    function readCurrentResumeData() {
-        try {
-            const key = RESUME_KEY_PREFIX + state.cid + '/1';
-            rememberResumeData(key, localStorage.getItem(key));
-        } catch (e) {}
-    }
-
-    function installResumeDataCapture() {
-        try {
-            const proto = window.Storage && window.Storage.prototype;
-            if (proto && !proto.__bwddResumeDataCapture) {
-                const original = proto.setItem;
-                const wrapped = function (key, value) {
-                    const result = original.apply(this, arguments);
-                    try { rememberResumeData(key, value); } catch (e) {}
-                    return result;
-                };
-                wrapped.__bwddResumeDataCapture = true;
-                proto.setItem = wrapped;
-                proto.__bwddResumeDataCapture = true;
-            }
-        } catch (e) {}
-        readCurrentResumeData();
-    }
-
     function bookWalkerPageName(index, source) {
-        const observed = state.resumePageNames[state.cid] && state.resumePageNames[state.cid][index - 1];
-        const name = observed || resumeStem(source);
-        // The page number keeps names unique when one source file contains
-        // multiple images. Padding also keeps filename-based readers in order.
-        const detail = name ? ' ' + Array.from(name).slice(0, 170).join('') : '';
-        return String(index).padStart(4, '0') + detail + '.' + IMAGE_CODEC.ext;
+        const path = String(source || '').split(/[?#]/, 1)[0];
+        const base = path.slice(path.lastIndexOf('/') + 1);
+        const stem = fsSafePath(base.replace(/\.(?:x?html?)$/i, ''));
+        // Manifest-only naming stays independent of the viewer's reading position.
+        // The ordinal distinguishes multiple images from the same source file.
+        const prefix = String(index).padStart(4, '0');
+        const suffix = '.' + IMAGE_CODEC.ext;
+        const encoder = new TextEncoder();
+        const budget = 255 - encoder.encode(prefix + ' ' + suffix).length;
+        let name = '';
+        let bytes = 0;
+        for (const char of stem) {
+            const size = encoder.encode(char).length;
+            if (bytes + size > budget) break;
+            name += char;
+            bytes += size;
+        }
+        return prefix + (name ? ' ' + name : '') + suffix;
     }
-
-    if (!isHeadlessPage()) installResumeDataCapture();
 
     // Headless auth refreshes must correlate like one browser session. Do not
     // mint a new BID on every retry/endpoint call, but never consult browser
@@ -3739,7 +3700,7 @@
     }
     const enc = new TextEncoder();
     function zipEntryNumber(path) {
-        const name = String(path || '');
+        const name = String(path || '').split('/').pop();
         const m = name.match(/^(\d+)(?=[ .])/) || name.match(/page-(\d+)\./i);
         return m ? Number(m[1]) : Infinity;
     }
@@ -7454,8 +7415,6 @@
             reportRunProgress(runOptions, 'state-refresh-start');
             await ensureStateFresh();
             reportRunProgress(runOptions, 'state-refresh-ready');
-            // Read the latest saved position before assigning output filenames.
-            if (!runOptions.headless) readCurrentResumeData();
             const config = state.decodedConfig || decodeConfig(state.configBody);
             const contents = config['configuration'] && config['configuration']['contents'];
             if (!contents || !contents.length) throw new Error('Configuration manifest contains no readable pages.');
