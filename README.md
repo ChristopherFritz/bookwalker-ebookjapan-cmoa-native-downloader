@@ -14,9 +14,19 @@ Only need one store? There are single-store builds too:
 [CMOA](https://greasyfork.org/en/scripts/597317-cmoa-native-downloader) ·
 [ebookjapan](https://greasyfork.org/en/scripts/597318-ebookjapan-native-downloader).
 
-<div align="center">
-<img width="944" height="703" alt="The download panel open over a book viewer" src="https://github.com/user-attachments/assets/73fb5156-072b-496c-98db-00a931663993" />
-</div>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/1f459486-330e-4fdc-b7a6-d0280b945cc4" />
+    </td>
+    <td align="center">
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/155da3f4-bafd-4831-a16e-100980adf1ba" />
+    </td>
+    <td align="center">
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/3a23070e-4839-4331-a558-0c9c86bf3f95" />
+    </td>
+  </tr>
+</table>
 
 ## Features
 
