@@ -31,7 +31,8 @@ Only need one store? There are single-store builds too:
 ## Features
 
 - **Download the open book as a ZIP.** Full editions, trial/free samples and
-  subscription viewers. Pages land as `Series/Volume/page-0001.jpg`, the page as
+  subscription viewers. BookWalker pages use names such as `0001 sourcename.jpg`
+  inside the archive; each image is saved as
   published rather than as displayed. Rename the file `.cbz` for CBZ readers.
 - **Or run it through Mokuro OCR.** Pages stream to
   [mokuro-bridge](https://github.com/GolyBidoof/mokuro-bridge) as they are
