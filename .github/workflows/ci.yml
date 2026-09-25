@@ -1,0 +1,59 @@
+# Builds every userscript from src/ and runs the full suite.
+#
+# The built .user.js files are committed, because a userscript manager installs
+# from a URL and GreasyFork's source sync fetches one. That makes "the committed
+# artifact is exactly what src/ produces" a real invariant rather than a
+# convenience, so `check:build` runs before the tests: a stale artifact fails
+# here instead of reaching an install.
+#
+# This workflow never publishes anything. Releases are cut by pushing a v* tag;
+# see release.yml.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push makes the run in flight pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # package-lock.json is gitignored, so `npm ci` is not available here.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      # `npm install` already fetches Chrome via puppeteer; this is the safety
+      # net for a cache that lost it, and it is a no-op when Chrome is present.
+      - name: Ensure a Chrome for the browser tests
+        run: npm run browser
+
+      # Fails if an artifact is stale, truncated, or does not compile.
+      - name: Artifacts match src/ and compile
+        run: npm run check:build
+
+      - name: Test suite
+        run: npm test
+
+      - name: Keep the built userscripts
+        uses: actions/upload-artifact@v4
+        with:
+          name: userscripts
+          path: '*.user.js'
+          if-no-files-found: error

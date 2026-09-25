@@ -3,13 +3,14 @@
 // (c) actually give a separate 6-socket pool when it is on.
 'use strict';
 const puppeteer = require('puppeteer');
+const { loadUserscript } = require('./_userscript');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const DELAY = 300;
 const BUF = Buffer.alloc(1024, 4);
 
@@ -47,7 +48,7 @@ const listen = (s) => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.addres
   // 'localhost' is used because 'localhost.' is a valid FQDN that resolves to
   // the same interface — exactly the host/host. relationship we are testing.
   const BASE = 'http://localhost:' + P + '/';
-  const uscript = fs.readFileSync(US, 'utf8');
+  const uscript = loadUserscript();
 
   const browser = await puppeteer.launch({
     executablePath: CHROME, headless: true, args: ['--no-sandbox', '--ignore-certificate-errors'],

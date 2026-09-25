@@ -1,0 +1,45 @@
+// ==UserScript==
+// @name         {{NAME}}
+// @namespace    http://tampermonkey.net/
+// @version      {{VERSION}}
+// @description  {{DESCRIPTION}}
+// @author       GolyBidoof
+// @homepageURL  https://github.com/GolyBidoof/bookwalker-ebookjapan-cmoa-native-downloader
+// @supportURL   https://github.com/GolyBidoof/bookwalker-ebookjapan-cmoa-native-downloader/issues
+// @updateURL    {{UPDATE_URL}}
+// @downloadURL  {{DOWNLOAD_URL}}
+{{MATCH_LINES}}
+// @icon         {{ICON}}
+// @grant        GM_xmlhttpRequest
+{{CONNECT_LINES}}
+// @run-at       document-end
+// @license      MIT
+//
+{{BANNER}}
+//
+// CREDITS
+//   - BookWalker viewer protocol reverse-engineered and validated against
+//     live HAR captures + the bookworm offline client (github.com/aaa4xu/bookworm).
+//   - CMOA speed-reader protocol ported from the original standalone CMOA
+//     userscript; the page descriptors and the tile-shuffle geometry come from
+//     the store's own SpeedBinb viewer.
+//   - Reading stats from LearnNatively (learnnatively.com, by Brandon) and
+//     manga-kotoba (manga-kotoba.com, by ChristopherFritz); they own that
+//     data and its styling.
+//   - OCR via mokuro: a performant fork of kha-white/mokuro
+//     (github.com/GolyBidoof/mokuro), run through the companion
+//     mokuro-bridge app (github.com/GolyBidoof/mokuro-bridge);
+//     upload backend is the bridge's own.
+//   - Built with DeepSeek V4 Flash (deepseek.com), the coding model that
+//     reverse-engineered and ported the crypto/descramble logic with the author.
+//
+// NOTE ON PERMISSIONS:
+//   On first install Tampermonkey asks for cross-origin access to
+//   learnnatively.com, manga-kotoba.com and whichever storefronts this build
+//   queries. Those permissions power the reading-stat cards and, in the
+//   combined build, the "also available on" store links, which ask each shop's
+//   own search page whether it carries the series. If you decline them, the
+//   script still works fully for downloading/Mokuro; the LearnNatively card
+//   falls back to a public CORS proxy (or hides), and the store links cannot be
+//   resolved, so they are simply not shown.
+// ==/UserScript==

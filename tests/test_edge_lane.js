@@ -4,6 +4,7 @@
 // lane wiring and the concurrency win without needing a Cloudflare account.
 'use strict';
 const puppeteer = require('puppeteer');
+const { loadUserscript } = require('./_userscript');
 const http = require('http');
 const http2 = require('http2');
 const https = require('https');
@@ -11,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const DELAY = 300;
 const BUF = Buffer.alloc(4096, 8);
 const N = 60;
@@ -68,7 +69,7 @@ const appSrv = https.createServer(
   (req, res) => { res.setHeader('Content-Type', 'text/html'); res.end('<html><body></body></html>'); });
 
 const listen = (s) => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.address().port)));
-const uscript = fs.readFileSync(US, 'utf8');
+const uscript = loadUserscript();
 
 (async () => {
   const cdnPort = await listen(cdnSrv);

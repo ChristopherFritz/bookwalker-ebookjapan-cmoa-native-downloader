@@ -15,7 +15,7 @@ const net = require('net');
 const { spawn } = require('child_process');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const BRIDGE = path.join(process.env.HOME, 'Projects', 'mokuro-bridge');
 const REAL_PORT = 62642;      // the bridge that is actually running
 const TEST_PORT = 63442;      // throwaway instance used for measurement

@@ -1,14 +1,18 @@
-# BookWalker Native Downloader · v1.5.1
+# Omnimanga Native Downloader · v2.0.0
 
 [Changelog](CHANGELOG.md)
 
-**[Download from GreasyFork](https://greasyfork.org/en/scripts/594508-bookwalker-native-downloader)** · or install the [raw userscript](bookwalker-native-downloader.user.js) · MIT licensed
+**[Install Omnimanga Native Downloader from GreasyFork](https://greasyfork.org/en/scripts/597313-omnimanga-native-downloader)** — one script for all three stores · or install the [raw userscript](omnimanga-native-downloader.user.js) · MIT licensed
 
-Download the book open in the [BookWalker browser viewer](https://bookwalker.jp) as a **ZIP of full-resolution page images**, or push its pages into a **mokuro Japanese-OCR pipeline** and have the finished volume land in your reader. All from one floating panel, without flipping a page.
+Only need one store? Single-store builds: [BookWalker](https://greasyfork.org/en/scripts/594508-bookwalker-native-downloader) · [CMOA](https://greasyfork.org/en/scripts/597317-cmoa-native-downloader) · [ebookjapan](https://greasyfork.org/en/scripts/597318-ebookjapan-native-downloader).
+
+Download the book open in the [BookWalker browser viewer](https://bookwalker.jp), the [CMOA](https://www.cmoa.jp) speed reader **or the [ebookjapan](https://ebookjapan.yahoo.co.jp) reader** as a **ZIP of full-resolution page images**, or push its pages into a **mokuro Japanese-OCR pipeline** and have the finished volume land in your reader. All from one floating panel, without flipping a page.
 
 <div align="center">
 <img width="944" height="703" alt="image" src="https://github.com/user-attachments/assets/73fb5156-072b-496c-98db-00a931663993" />
 </div>
+
+**One script, three stores.** BookWalker, CMOA and ebookjapan are served by the same panel, the same controls, the same mokuro-bridge pipeline, the same ZIP naming and the same reading-stat cards. Only the store-specific protocol differs, and it lives in its own module — see [src/README.md](src/README.md).
 
 **The short pitch:** most BookWalker downloaders *watch the viewer*: they turn pages, screenshot canvases, and scrape whatever renders on screen. This script ignores the screen. It takes the viewer's own signed CDN URLs, fetches every page file directly, **reverses BookWalker's tile-shuffle offline**, and gives you original-resolution pages in a `Series/Volume/page-0001.jpg` layout, at download speed, with no babysitting.
 
@@ -33,6 +37,7 @@ For OCR you need the engine and the bridge: this script gets the pages off BookW
 - **Pick where the volume goes, per run**. A dropdown of every destination the bridge knows: **Local**, **MEGA**, **Google Drive**, **OneDrive**, **WebDAV**, … Unconfigured providers are marked *needs setup* and show the one-time bridge command to enable them.
 - **One click into your reader**. After an OCR run, the panel offers **Open Reader Mokuro** (jumps to the volume on reader.mokuro.app) and **Open stored file** (a direct link to the saved `.cbz`, including rebuilt WebDAV URLs).
 - **Reading-stats cards**. Looks up the book on [manga-kotoba.com](https://manga-kotoba.com) and [Natively / LearnNatively](https://learnnatively.com) and shows stats inline: Natively **Level** with its JLPT-band colors, ratings average, reader counts, WK/BC badges, plus manga-kotoba word totals, unique words, used-once rate, new words and lexical density. Know before you download whether the book is above your level.
+- **"Also available on" store links, with what they charge** *(combined build only)*. Small pills for **CMOA**, **BookWalker** and **ebookjapan** sit under the book details. Each asks that shop's own public search page whether it carries the series and, when it does, links straight to the shop's page for the book — the series/title page, **never a viewer** — and reports two separate things: whether the volume you are reading can be read free (`free`), or what it costs (`¥792`), **plus how many volumes in the series are free** (`2 vols free`) — so a paid volume reads `¥792 · 2 vols free` and a free one reads `free · 2 vols free`. A pill is highlighted whenever that store has free reading available, and each store's count comes from its own page for that book. A shop that does not carry the book gets **no pill at all**, and if no shop carries it the card is not rendered — so it never claims a book is somewhere it isn't, and never leaves an empty frame behind. A volume with no number in its title (a one-shot, or an unnumbered first volume) is matched on its exact title instead of a number, so it still reports a price rather than a bare “available”. (ebookjapan renders its pages client-side, so it reports its campaign free-volume count and no price.)
 - **Resume, not restart**. Pages are cached to IndexedDB while running; an interrupted run picks up where it left off, and a partial failure tells you which pages are missing; the next run fetches only those.
 - **Parallel engine**. Pages are prefetched in parallel and descrambled across a Web-Worker pool (up to ~2× your CPU cores, capped), with live **fetch** and **descramble** progress bars.
 - **Parallel downloads across multiple origins**. Chrome allows only 6 concurrent HTTP/1.1 connections per *origin*, and the page CDN is a single HTTP/1.1 host, so a page lane alone is pinned at 6. Requests are spread across the page, Tampermonkey's background context, a trailing-dot host, and each fetch-proxy port mokuro-bridge exposes. Measured at **294 concurrent sockets** with the bridge up, against 6 without it.
@@ -62,8 +67,8 @@ Most scripts for this site are *page-turners* that flip through the book and cap
 ## Installation
 
 1. Install a userscript manager: [Tampermonkey](https://www.tampermonkey.net/) (Chrome/Firefox/Edge) or [Violentmonkey](https://violentmonkey.github.io/).
-2. Install the script from [GreasyFork](https://greasyfork.org/en/scripts/594508-bookwalker-native-downloader) (recommended), or open [`bookwalker-native-downloader.user.js`](bookwalker-native-downloader.user.js) and click **Install**.
-3. Open any book in the BookWalker viewer and use the panel.
+2. Install [Omnimanga Native Downloader](https://greasyfork.org/en/scripts/597313-omnimanga-native-downloader) from GreasyFork (recommended), or open [`omnimanga-native-downloader.user.js`](omnimanga-native-downloader.user.js) and click **Install**.
+3. Open any book in one of the three viewers and use the panel.
 
 > **Important: turn off other BookWalker userscripts.** Any other userscript that runs on BookWalker must be disabled for this script to work. Other downloaders and page-capture scripts interfere with the viewer's network traffic, which this script relies on to capture the signed CDN URLs it uses to fetch pages directly. Disable them in your userscript manager before running this one.
 
@@ -71,10 +76,10 @@ Most scripts for this site are *page-turners* that flip through the book and cap
 
 ### Permissions (please read)
 
-On first install, Tampermonkey asks for **cross-origin access to `learnnatively.com` and `manga-kotoba.com`**. That permission only powers the **reading-stats cards**.
+On first install, Tampermonkey asks for **cross-origin access to `learnnatively.com`, `manga-kotoba.com` and the three storefronts (`bookwalker.jp`, `cmoa.jp`, `ebookjapan.yahoo.co.jp`)**. That permission only powers the **reading-stats cards** and the **"also available on" store links** (which work by reading each shop's own public search page).
 
-- If you **accept**: stats load directly.
-- If you **decline**: downloading and OCR work exactly the same. The Natively card is then fetched through a public CORS proxy instead; if that proxy is unreachable, the card shows a "not available" note and nothing breaks.
+- If you **accept**: stats and store links load directly.
+- If you **decline**: downloading and OCR work exactly the same. The Natively card is then fetched through a public CORS proxy instead and the store pills cannot be resolved, so they are simply not shown; if that proxy is unreachable, the card shows a "not available" note and nothing breaks.
 
 You can grant/revoke this later in Tampermonkey: Dashboard → this script → **Settings → User permissions → External connections**.
 
@@ -87,15 +92,20 @@ The Mokuro path needs [mokuro-bridge](https://github.com/GolyBidoof/mokuro-bridg
 Three pieces, none of which touch the viewer's canvas:
 
 ```
-BookWalker viewer
-   │  (you open the book; the script passively watches its network)
-   ▼
-┌─────────────────────── bookwalker-native-downloader.user.js ────────────────────────┐
-│ 1. capture signed CDN URLs + decrypt configuration_pack.json                        │
-│ 2. fetch every page from the CDN (parallel prefetch, auth auto-renewal)             │
-│ 3. descramble tile-shuffled pages in a Web-Worker pool                              │
-│ 4. either pack a ZIP, or stream pages to mokuro-bridge                              │
-└───────────────┬───────────────────────────────────────────────┬─────────────────────┘
+ BookWalker viewer                                CMOA speed reader
+   │  (passively watched)                            │  (viewer page list + reader)
+   ▼                                                 ▼
+┌───────────────── sites/bookwalker/ ────┬──── sites/cmoa/ ────────────────────────────┐
+│ 1. capture signed CDN URLs + decrypt    │ 1. read page list + descramble geometry     │
+│    configuration_pack.json              │    from the viewer's own reader             │
+│ 2. fetch via lanes (auth auto-renewal)  │ 2. fetch sbcGetImg.php at best quality      │
+│ 3. descramble in a Web-Worker pool      │    (quality × token retry ladder)           │
+│                                         │ 3. reassemble tiles on a canvas             │
+└───────────────┬─────────────────────────┴───────────────┬─────────────────────────────┘
+                │        both drive the shared core:       │
+                │  panel · bars · mokuro-bridge · stats ·  │
+                │  ZIP naming + writer · page cache        │
+                └───────────────┬─────────────────────────┘
                 │ ZIP (offline)                                 │ pages (POST /session/…)
                 ▼                                               ▼
       Series/Volume/page-0001.jpg          ┌──────────────── mokuro-bridge ────────────────┐
@@ -160,9 +170,20 @@ Everything runs in **Web Workers** (direct canvas tile blits + JPEG re-encode), 
 
 | Path | Description |
 | --- | --- |
-| `bookwalker-native-downloader.user.js` | The userscript (single file, self-contained) |
+| `omnimanga-native-downloader.user.js` | The built userscript (single file, self-contained) |
+| `src/` | The sources it is built from — see [src/README.md](src/README.md) |
+| `build.mjs` | Concatenates `src/` into the userscript (`npm run build`) |
+| `tools/` | Release helpers — `release-notes.mjs` prints a CHANGELOG section |
+| `.github/workflows/` | CI and release automation — see [RELEASING.md](RELEASING.md) |
+| `tests/` | Hermetic browser tests (`npm test`) |
 | `README.md` | This file |
 | `LICENSE` | MIT |
+
+> **Don't edit the `.user.js` by hand** — it is generated. Edit `src/` and run
+> `npm run build`; `npm run check:build` fails when the two are out of sync.
+>
+> Shipping it is `npm run bump <part>`, commit, push — CI checks the artifacts
+> and publishes the release. See [RELEASING.md](RELEASING.md).
 
 ## Credits
 
@@ -183,7 +204,7 @@ The project also stands on the shoulders of a lot of great work. Thank you to:
 
 ### Trademarks & data
 
-"BookWalker" is a trademark of its respective owner. Natively/LearnNatively and Manga Kotoba data are the property of Brandon / the Natively project and of ChristopherFritz respectively; this project is an independent tool and is not affiliated with or endorsed by any of them.
+"BookWalker", "CMOA" and "ebookjapan" are trademarks of their respective owners; the store links are ordinary search and product URLs, and this project is not affiliated with or endorsed by any of them. Natively/LearnNatively and Manga Kotoba data are the property of Brandon / the Natively project and of ChristopherFritz respectively; this project is an independent tool and is not affiliated with or endorsed by any of them.
 
 ## Disclaimer
 

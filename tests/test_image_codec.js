@@ -5,12 +5,13 @@
 // reference, and that a lossy setting still yields a sane image.
 'use strict';
 const puppeteer = require('puppeteer');
+const { loadUserscript } = require('./_userscript');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const W = 1200, H = 1800;
 
 const appSrv = https.createServer(
@@ -34,6 +35,23 @@ const CONFIGS = [
   const results = [];
   const check = (n, pass, d) => { results.push({ n, pass, d }); console.log((pass?'PASS  ':'FAIL  ')+n+'  — '+d); };
 
+  // Every case here builds its reference page with BookWalker's own A9p
+  // descrambler, so the file only applies to an artifact carrying that module.
+  // The CMOA-only build has no A9p by design: skip instead of crashing.
+  {
+    const probe = await browser.newPage();
+    await probe.goto(APP);
+    await probe.addScriptTag({ content: loadUserscript() });
+    await sleep(250);
+    const hasA9p = await probe.evaluate(() => !!(window.__bwdd && typeof window.__bwdd.A9p === 'function'));
+    await probe.close();
+    if (!hasA9p) {
+      await browser.close(); appSrv.close();
+      console.log('SKIP  test_image_codec.js  — this artifact has no BookWalker A9p descrambler');
+      process.exit(0);
+    }
+  }
+
   for (const cfg of CONFIGS) {
     const page = await browser.newPage();
     page.on('pageerror', e => console.log('[pageerror]', String(e).slice(0,160)));
@@ -43,7 +61,7 @@ const CONFIGS = [
       try { localStorage.clear(); for (const k of Object.keys(set)) localStorage.setItem(k, set[k]); } catch (e) {}
     }, cfg.set);
     await page.goto(APP);
-    await page.addScriptTag({ content: fs.readFileSync(US, 'utf8') });
+    await page.addScriptTag({ content: loadUserscript() });
     await sleep(250);
 
     const out = await page.evaluate(async (W, H) => {

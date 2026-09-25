@@ -1,0 +1,255 @@
+{
+  "note": "Fragment order for build.mjs. Which modules land in which artifact is decided by src/targets.json. Only `file`, `module` and `note` are read; nothing here is derived from the built files, because a recorded byte or line count cannot be kept true by hand.",
+  "fragments": [
+    {
+      "file": "_meta/00-header.txt",
+      "module": "_meta",
+      "note": "userscript metadata block: every store, grants, connects"
+    },
+    {
+      "file": "_meta/01-wrapper-open.js",
+      "module": "_meta",
+      "note": "the shared IIFE opening (`(function () { 'use strict';`)"
+    },
+    {
+      "file": "core/00-identity.js",
+      "module": "core",
+      "note": "version/author/repo identity, read from the installed metadata"
+    },
+    {
+      "file": "sites/bookwalker/00-state.js",
+      "module": "sites/bookwalker",
+      "note": "BookWalker protocol state and shared auth/codec constants"
+    },
+    {
+      "file": "core/10-util.js",
+      "module": "core",
+      "note": "headless detection and log/URL redaction helpers"
+    },
+    {
+      "file": "core/11-automation.js",
+      "module": "core",
+      "note": "headless automation API (window.__bwddAutomation) and run-option normalisation"
+    },
+    {
+      "file": "core/12-imagecodec.js",
+      "module": "core",
+      "note": "output codec selection (jpeg/webp/lossless/png)"
+    },
+    {
+      "file": "sites/bookwalker/01-debug-helpers.js",
+      "module": "sites/bookwalker",
+      "note": "?bwddDebug gate and the NFBR page-global walker"
+    },
+    {
+      "file": "core/13-pagecache.js",
+      "module": "core",
+      "note": "IndexedDB page cache so an interrupted volume resumes"
+    },
+    {
+      "file": "sites/bookwalker/02-capture.js",
+      "module": "sites/bookwalker",
+      "note": "passively capture the viewer's signed API responses"
+    },
+    {
+      "file": "sites/bookwalker/03-crypto.js",
+      "module": "sites/bookwalker",
+      "note": "configuration_pack.json decrypt (base64 + RC4 key schedule)"
+    },
+    {
+      "file": "sites/bookwalker/04-descramble-a9p.js",
+      "module": "sites/bookwalker",
+      "note": "tile-shuffle geometry (A9p) and helpers"
+    },
+    {
+      "file": "sites/bookwalker/05-filename-token.js",
+      "module": "sites/bookwalker",
+      "note": "per-page filename token derivation"
+    },
+    {
+      "file": "sites/bookwalker/06-auth-helpers.js",
+      "module": "sites/bookwalker",
+      "note": "CloudFront auth query building and BID handling"
+    },
+    {
+      "file": "sites/bookwalker/07-worker-descramble.js",
+      "module": "sites/bookwalker",
+      "note": "builds the descramble Web Worker source"
+    },
+    {
+      "file": "core/20-worker-pool.js",
+      "module": "core",
+      "note": "worker count and per-format batch sizing"
+    },
+    {
+      "file": "sites/bookwalker/08-worker-main.js",
+      "module": "sites/bookwalker",
+      "note": "the worker body that reassembles one BookWalker page"
+    },
+    {
+      "file": "core/21-transport-pool.js",
+      "module": "core",
+      "note": "transport lanes: on-page fetch, GM_xhr, local proxy ports, edge mirror"
+    },
+    {
+      "file": "sites/bookwalker/09-decode-blob.js",
+      "module": "sites/bookwalker",
+      "note": "decode a prefetched Blob with BookWalker seeds"
+    },
+    {
+      "file": "core/22-transport-health.js",
+      "module": "core",
+      "note": "cooldowns, circuit breaker, CORS-like error classification"
+    },
+    {
+      "file": "sites/bookwalker/10-cdn-fetch.js",
+      "module": "sites/bookwalker",
+      "note": "BookWalker CDN base candidates and signed fetch"
+    },
+    {
+      "file": "core/23-transport-burst.js",
+      "module": "core",
+      "note": "burst sizing under consecutive blocks"
+    },
+    {
+      "file": "sites/bookwalker/11-auth-policy.js",
+      "module": "sites/bookwalker",
+      "note": "auth policy signature and refresh budget"
+    },
+    {
+      "file": "core/30-stats.js",
+      "module": "core",
+      "note": "manga-kotoba + LearnNatively lookup and card rendering"
+    },
+    {
+      "file": "core/31-mokuro.js",
+      "module": "core",
+      "note": "mokuro-bridge client: health, sessions, page upload, finalize stream"
+    },
+    {
+      "file": "core/32-availability.js",
+      "module": "feature/availability",
+      "note": "cross-store availability: which other shops carry this series, linked to their store pages"
+    },
+    {
+      "file": "core/34-unified-link.js",
+      "module": "feature/unified-link",
+      "note": "single-store builds only: a panel-header link to the combined script"
+    },
+    {
+      "file": "core/40-naming.js",
+      "module": "core",
+      "note": "cross-platform file naming, archive naming, message wording"
+    },
+    {
+      "file": "core/41-zip.js",
+      "module": "core",
+      "note": "dependency-free store-method ZIP writer"
+    },
+    {
+      "file": "core/50-styles.js",
+      "module": "core",
+      "note": "panel stylesheet and theme"
+    },
+    {
+      "file": "core/51-panel.js",
+      "module": "core",
+      "note": "the panel UI: layout, controls, bars, archive-name field"
+    },
+    {
+      "file": "sites/bookwalker/20-auth-lifecycle.js",
+      "module": "sites/bookwalker",
+      "note": "auth refresh against the viewer's own endpoints"
+    },
+    {
+      "file": "core/60-mokuro-flow.js",
+      "module": "core",
+      "note": "early cover upload and the shared OCR finalize phase"
+    },
+    {
+      "file": "core/61-run-harness.js",
+      "module": "core",
+      "note": "shared run plumbing: bars, Mokuro session, ZIP assembly, outcomes"
+    },
+    {
+      "file": "core/70-site.js",
+      "module": "core",
+      "note": "site adapter registry, detection and the shared panel boot loop"
+    },
+    {
+      "file": "sites/bookwalker/21-trial-zip.js",
+      "module": "sites/bookwalker",
+      "note": "BookWalker sample/trial (plaintext config) pipeline"
+    },
+    {
+      "file": "sites/bookwalker/22-run.js",
+      "module": "sites/bookwalker",
+      "note": "BookWalker full-edition pipeline"
+    },
+    {
+      "file": "sites/bookwalker/23-config.js",
+      "module": "sites/bookwalker",
+      "note": "decode and validate configuration_pack.json"
+    },
+    {
+      "file": "sites/bookwalker/24-preview.js",
+      "module": "sites/bookwalker",
+      "note": "BookWalker book-card preview from the manifest"
+    },
+    {
+      "file": "sites/bookwalker/30-adapter.js",
+      "module": "sites/bookwalker",
+      "note": "registers the BookWalker adapter"
+    },
+    {
+      "file": "sites/ebookjapan/00-state.js",
+      "module": "sites/ebookjapan",
+      "note": "ebookjapan detection, viewer URL parsing and the book manifest/session resolution"
+    },
+    {
+      "file": "sites/ebookjapan/01-glue.js",
+      "module": "sites/ebookjapan",
+      "note": "ebookjapan pinned wasm core: embedded glue + wasm, checksum tripwire, module load"
+    },
+    {
+      "file": "sites/ebookjapan/02-descramble.js",
+      "module": "sites/ebookjapan",
+      "note": "ebookjapan canvas realm ladder, portable canvas encoder, autograph overlay and tile descrambler"
+    },
+    {
+      "file": "sites/ebookjapan/04-worker.js",
+      "module": "sites/ebookjapan",
+      "note": "ebookjapan off-thread descrambling on the shared core pool: job envelope and worker source"
+    },
+    {
+      "file": "sites/ebookjapan/05-run.js",
+      "module": "sites/ebookjapan",
+      "note": "ebookjapan run pipeline (harness, lane fetch, paint gate) and adapter registration"
+    },
+    {
+      "file": "sites/cmoa/00-state.js",
+      "module": "sites/cmoa",
+      "note": "CMOA metadata: state, token pool, viewer/reader access, content info"
+    },
+    {
+      "file": "sites/cmoa/01-fetch.js",
+      "module": "sites/cmoa",
+      "note": "CMOA sbcGetImg URL building, binary fetch and canvas descramble"
+    },
+    {
+      "file": "sites/cmoa/02-run.js",
+      "module": "sites/cmoa",
+      "note": "CMOA run pipeline and adapter registration"
+    },
+    {
+      "file": "entry/90-boot.js",
+      "module": "entry",
+      "note": "picks the adapter, installs its hooks, brings up the shared panel"
+    },
+    {
+      "file": "_meta/99-wrapper-close.js",
+      "module": "_meta",
+      "note": "the shared IIFE close (`})();`)"
+    }
+  ]
+}

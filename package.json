@@ -1,15 +1,22 @@
 {
-  "name": "bookwalker-native-downloader",
-  "version": "1.5.1",
+  "name": "bookwalker-ebookjapan-cmoa-native-downloader",
+  "version": "2.0.0",
   "private": true,
-  "description": "Browser-driven tests for the BookWalker Native Downloader userscript.",
+  "repository": "https://github.com/GolyBidoof/bookwalker-ebookjapan-cmoa-native-downloader",
+  "description": "Browser userscript that downloads, descrambles and archives books from BookWalker, CMOA and ebookjapan.",
   "license": "MIT",
   "scripts": {
+    "build": "node build.mjs",
+    "bump": "node bump.mjs",
+    "notes": "node tools/release-notes.mjs",
+    "sync-urls": "node tools/sync-urls.mjs",
+    "check:build": "node build.mjs --check",
     "test": "node tests/run.js",
     "test:bridge": "BWDD_RUN_BRIDGE_E2E=1 node tests/test_bridge_e2e.js",
     "browser": "puppeteer browsers install chrome"
   },
   "devDependencies": {
-    "puppeteer": "^25.10.0"
+    "puppeteer": "^25.10.0",
+    "sharp": "^0.34.5"
   }
 }

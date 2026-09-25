@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const UP = 63842, DEAD = 63899, NPORTS = 12;
 
 const ports = Array.from({ length: NPORTS }, (_, i) => UP + 1 + i);
@@ -156,7 +156,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     return { clicks: window.__ghClickCount, href: link && link.href, target: link && link.target };
   });
   check('the header GitHub link is clickable and opens the repository target',
-    ghBox && ghState.clicks === 1 && ghState.href === 'https://github.com/GolyBidoof/bookwalker-native-downloader' && ghState.target === '_blank',
+    ghBox && ghState.clicks === 1 && ghState.href === 'https://github.com/GolyBidoof/bookwalker-ebookjapan-cmoa-native-downloader' && ghState.target === '_blank',
     JSON.stringify(ghState));
 
   check('format picker exists with all four choices',

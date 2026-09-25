@@ -1,0 +1,126 @@
+# Publishes a GitHub Release carrying every built userscript, and refreshes the
+# `release` branch that GreasyFork's source sync reads.
+#
+# Deliberately NOT triggered by a push to main: main carries work in progress, and
+# an installed script (or a synced GreasyFork entry) must not move until a release
+# is actually cut. Push freely; publish by tagging:
+#
+#   npm run bump minor
+#   # add the "## vX.Y.Z" section to CHANGELOG.md
+#   npm test
+#   git add -A && git commit -m "Release vX.Y.Z"
+#   git tag vX.Y.Z && git push origin main --tags
+#
+# A tag that disagrees with the core version fails rather than mislabelling a
+# release, and re-running for an already-published version is a no-op.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog section becomes the release body, and notes are
+          # generated from history when there is none.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # A tag has to agree with the version the build stamps into @version;
+      # otherwise the release is labelled one thing and installs as another.
+      - name: Work out the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          CORE=$(node -e "const fs=require('fs');const m=/return '([0-9]+\.[0-9]+\.[0-9]+)'/.exec(fs.readFileSync('src/core/00-identity.js','utf8'));if(!m)throw new Error('BWDD_VERSION not found in src/core/00-identity.js');process.stdout.write(m[1])")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${CORE}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match the core version v${CORE}"
+              exit 1
+            fi
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v${CORE}"
+          fi
+          echo "core=${CORE}" >> "$GITHUB_OUTPUT"
+          echo "name=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "releasing ${TAG}"
+
+      - name: Already released?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.name }}" >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.tag.outputs.name }} is already published — nothing to do"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install
+        if: steps.check.outputs.already == 'false'
+        run: npm install --no-audit --no-fund
+
+      - name: Ensure a Chrome for the browser tests
+        if: steps.check.outputs.already == 'false'
+        run: npm run browser
+
+      # Never publish an artifact that is stale or does not compile.
+      - name: Artifacts match src/ and compile
+        if: steps.check.outputs.already == 'false'
+        run: npm run check:build
+
+      - name: Test suite
+        if: steps.check.outputs.already == 'false'
+        run: npm test
+
+      - name: Publish the release
+        if: steps.check.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.name }}"
+          # The asset list comes from targets.json, so a new store is released
+          # without touching this workflow.
+          FILES=$(node -e "process.stdout.write(Object.values(require('./src/targets.json')).map(t => t.out).join(' '))")
+          NOTES=$(mktemp)
+          if node tools/release-notes.mjs "$TAG" > "$NOTES" 2>/dev/null && [ -s "$NOTES" ]; then
+            gh release create "$TAG" $FILES --title "$TAG" --notes-file "$NOTES"
+          else
+            echo "::warning::no CHANGELOG.md section for ${TAG} — using generated notes"
+            gh release create "$TAG" $FILES --title "$TAG" --generate-notes
+          fi
+          echo "published ${TAG}: ${FILES}"
+
+      # GreasyFork's source sync takes a raw URL and re-fetches it periodically.
+      # It reads this branch rather than main, so a synced entry moves on a
+      # release and never because somebody pushed work in progress. The branch
+      # holds nothing but the built artifacts.
+      - name: Refresh the release branch (GreasyFork's sync source)
+        if: steps.check.outputs.already == 'false'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.name }}"
+          FILES=$(node -e "process.stdout.write(Object.values(require('./src/targets.json')).map(t => t.out).join(' '))")
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout --orphan release-build
+          git rm -rf --cached . >/dev/null
+          git add -f $FILES
+          git commit -m "Release ${TAG}"
+          git push --force origin release-build:release
+          echo "release branch updated for ${TAG}: ${FILES}"

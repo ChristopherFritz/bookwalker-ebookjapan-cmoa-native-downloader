@@ -7,12 +7,13 @@
 // several tile geometries, and checks the new no-op short-circuit.
 'use strict';
 const puppeteer = require('puppeteer');
+const { loadUserscript } = require('./_userscript');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 const W = 1400, H = 2100, Q = 0.92;
 
 const appSrv = https.createServer(
@@ -70,7 +71,7 @@ const CASES = [
   const page = await browser.newPage();
   page.on('pageerror', e => console.log('[pageerror]', String(e).slice(0, 200)));
   await page.goto('https://127.0.0.1:' + appPort + '/?bwddDebug=1');
-  await page.addScriptTag({ content: fs.readFileSync(US, 'utf8') });
+  await page.addScriptTag({ content: loadUserscript() });
   await sleep(300);
 
   const results = [];

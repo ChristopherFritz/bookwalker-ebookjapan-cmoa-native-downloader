@@ -1,5 +1,5 @@
 // test_lanes.js — focused harness for the transport-lane changes in
-// bookwalker-native-downloader.user.js.
+// omnimanga-native-downloader.user.js.
 //
 // Two local HTTP servers stand in for the two "socket pools":
 //   * cdnPort  — hit by the page lane (plain fetch())
@@ -15,12 +15,13 @@
 //   5. a duplicate relPath is only fetched once (inflight de-dupe)
 'use strict';
 const puppeteer = require('puppeteer');
+const { loadUserscript } = require('./_userscript');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'bookwalker-native-downloader.user.js');
+const US = path.resolve(__dirname, '..', process.env.BWDD_US || 'omnimanga-native-downloader.user.js');
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -68,7 +69,7 @@ const listen = (s) => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.addres
   const GM = 'http://127.0.0.1:' + gmPort;
   const APP = 'http://127.0.0.1:' + appPort + '/?bwddDebug=1';
 
-  const uscript = fs.readFileSync(US, 'utf8');
+  const uscript = loadUserscript();
   const browser = await puppeteer.launch({
     executablePath: CHROME, headless: true, args: ['--no-sandbox', '--disable-gpu'],
   });
