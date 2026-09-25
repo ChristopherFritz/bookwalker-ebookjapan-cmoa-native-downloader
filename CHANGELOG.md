@@ -475,7 +475,7 @@ First round of fixes from testing against the live CMOA reader.
 ### Tests
 - Added `tests/test_cmoa_ocr.js` (16 checks): a stub mokuro bridge over the real
   protocol plus a local HTTPS storefront reached as `www.cmoa.jp` via Chrome's
-  host resolver, asserting the CMOA OCR path end to end — the session opens with
+  host resolver, asserting the CMOA OCR path end to end: the session opens with
   the shared archive name, pages arrive once each in reading order as
   `page-NNNN.jpg`, the cover goes early, finalize is consumed, and the bytes the
   bridge receives are pixel-verified as *descrambled* pages. The title checks
@@ -520,7 +520,7 @@ First round of fixes from testing against the live CMOA reader.
 ### Tests
 
 - New `tests/test_cmoa_adapter.js` (14 checks): drives a full ZIP download on a
-  synthetic `cmoa.jp` speed-reader page — adapter detection, panel branding,
+  synthetic `cmoa.jp` speed-reader page: adapter detection, panel branding,
   clean-title extraction, shared archive naming, the quality/token retry ladder,
   flat `page-NNNN.jpg` entries, and pixel-level verification that a shuffled page
   is reassembled correctly.
