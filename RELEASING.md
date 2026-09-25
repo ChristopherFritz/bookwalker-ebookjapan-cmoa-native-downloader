@@ -6,11 +6,26 @@
 npm run bump minor     # patch | minor | major | x.y.z; bumps the core version,
                        # README title and package.json, then rebuilds every artifact
 # add the "## vX.Y.Z" section to CHANGELOG.md
-npm test               # the whole userscript suite (14 files, browser fixtures)
+npm test               # the whole userscript suite (15 files, browser fixtures)
 git add -A && git commit -m "Release vX.Y.Z"
 git tag vX.Y.Z
 git push origin main --tags
 ```
+
+Two things about that last line, both learned the hard way:
+
+- **The tag push is what starts the release.** If the tag goes up in the same push
+  that introduces `.github/workflows/release.yml` for the first time, GitHub does
+  not run it for that push. `gh workflow run release.yml` publishes from the
+  default branch instead, which is why that file also has a `workflow_dispatch`
+  trigger.
+- **Never delete a release tag.** Deleting a tag that a published release points
+  at silently turns the release into a **draft**. `releases/latest/download/...`
+  then stops resolving, so installed scripts stop finding updates. Re-pushing the
+  tag does not repair it either, because the workflow's "already released?" guard
+  skips the publish step. `gh release edit vX.Y.Z --draft=false` is the fix, and
+  `gh release view vX.Y.Z --json isDraft,assets` is the check: `draft=false` and
+  four assets.
 
 **Pushing to `main` publishes nothing.** `ci.yml` builds every artifact, proves
 the committed files match `src/` and compile, and runs the full suite, and that
