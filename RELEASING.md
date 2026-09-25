@@ -133,10 +133,14 @@ Each entry's description is **not** synced either: GreasyFork replaces code only
 
 | Entry | Listing copy |
 | --- | --- |
-| 597313 Omnimanga Native Downloader | `docs/greasyfork/omnimanga-native-downloader.md` |
-| 594508 BookWalker Native Downloader | `docs/greasyfork/bookwalker-native-downloader.md` |
-| 597317 CMOA Native Downloader | `docs/greasyfork/cmoa-native-downloader.md` |
-| 597318 ebookjapan Native Downloader | `docs/greasyfork/ebookjapan-native-downloader.md` |
+| 597313 Omnimanga Native Downloader | `docs/greasyfork/omnimanga-native-downloader.html` |
+| 594508 BookWalker Native Downloader | `docs/greasyfork/bookwalker-native-downloader.html` |
+| 597317 CMOA Native Downloader | `docs/greasyfork/cmoa-native-downloader.html` |
+| 597318 ebookjapan Native Downloader | `docs/greasyfork/ebookjapan-native-downloader.html` |
+
+The files are HTML, because that is what the description field takes. Every tag in them
+is on [GreasyFork's allowed-markup list](https://greasyfork.org/en/help/allowed-markup)
+(`p`, `ul`, `li`, `strong`, `code`, `a href`), and nothing else is used.
 
 The combined build and the single-store builds advertise different things: the "also available on" store pills exist only in the combined script, and each single-store script instead carries a pill linking to it. Do not paste the combined copy into a single-store entry.
 
