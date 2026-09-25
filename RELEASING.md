@@ -127,6 +127,19 @@ All four artifacts are committed on `main` as of v2.0.0, so their raw `main`
 URLs resolve. GreasyFork should still sync from the `release` branch, which only
 ever carries published versions.
 
+### Listing copy
+
+Each entry's description is **not** synced either: GreasyFork replaces code only. Paste it by hand when it changes. The paste-ready copy lives in `docs/greasyfork/`, one file per entry:
+
+| Entry | Listing copy |
+| --- | --- |
+| 597313 Omnimanga Native Downloader | `docs/greasyfork/omnimanga-native-downloader.md` |
+| 594508 BookWalker Native Downloader | `docs/greasyfork/bookwalker-native-downloader.md` |
+| 597317 CMOA Native Downloader | `docs/greasyfork/cmoa-native-downloader.md` |
+| 597318 ebookjapan Native Downloader | `docs/greasyfork/ebookjapan-native-downloader.md` |
+
+The combined build and the single-store builds advertise different things: the "also available on" store pills exist only in the combined script, and each single-store script instead carries a pill linking to it. Do not paste the combined copy into a single-store entry.
+
 ### Size
 
 GreasyFork's limit is 2 MB. The combined artifact is the largest at ~773 KB and
